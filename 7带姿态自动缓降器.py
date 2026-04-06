@@ -28,10 +28,6 @@ target_point_ = np.array([0, 1, 0])
 yaw_gain = 1.0
 pitch_gain = 1.0
 
-# 自动定高 PID（与 3自动定高.py 相同）
-target_height = 200.0
-height_controller = PositionPID(max=1, min=0, p=0.1, i=0, d=0.07)
-
 p_turn = 2.0
 i_turn = 0.0
 d_turn = 1.4
