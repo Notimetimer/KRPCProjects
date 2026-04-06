@@ -69,11 +69,33 @@ dt = 1
 conn = krpc.connect(name='Velocity Vectors')  
 vessel = conn.space_center.active_vessel  
 GravSource = vessel.orbit.body
-control = vessel.control    
+control = vessel.control  
+# 体轴系
+vessel_ref = vessel.reference_frame   
 # 获取表面参考系  
-s_frame = vessel.surface_reference_frame
+surface_frame = vessel.surface_reference_frame
 # 使用表面参考系获取飞行数据
-flight = vessel.flight(s_frame)  
+flight = vessel.flight(surface_frame)  
+
+# 体轴基本方向  
+body_axes = {  
+    'forward': (0, 1, 0),  # 机头  
+    'right': (1, 0, 0),    # 右侧  
+    'down': (0, 0, 1)      # 下方  
+}  
+body_axes_custom = {
+    'x': None, # 前
+    'y': None, # 上
+    'z': None, # 右
+}
+
+# 天北东到北天东
+def UNE2NUE(direction0):
+    direction = np.zeros(3)
+    direction[0] = direction0[1]
+    direction[1] = direction0[0]
+    direction[2] = direction0[2]
+    return direction
 
 def transform_surface_velocity(velocity_vec, longitude=0, latitude=0):
     # 经纬度为角度制
@@ -95,8 +117,8 @@ for i in range(int(60*5/dt)):
     orbital_vel = vessel.flight(orbital_frame).velocity
     
     # 相对地表速度？  东，北，地？不对，是相对旋转地表的速度, 上北东？
-    surface_frame = GravSource.reference_frame  
-    surface_vel = vessel.flight(surface_frame).velocity  
+    Globe_frame = GravSource.reference_frame  
+    surface_vel = vessel.flight(Globe_frame).velocity  
 
     # 左手系速度（0E, N, 90E）
     velocity0 = np.array(surface_vel)
@@ -106,22 +128,34 @@ for i in range(int(60*5/dt)):
 
 
     # 机头指向(天北东？)
-    direction0 = np.array(vessel.direction(s_frame))
+    direction0 = np.array(vessel.direction(surface_frame))
     # 机头指向(转为习惯的北天东)
-    direction = np.zeros(3)
-    direction[0] = direction0[1]
-    direction[1] = direction0[0]
-    direction[2] = direction0[2]
-    
-
+    direction = UNE2NUE(direction0)
     print("速度矢量:", np.round(velocity, 2))
     print("机头指向:", np.round(direction, 2))
-    distance_to_center = vessel.orbit.radius
-    print("距地心距离：", distance_to_center/1000 ,"km")
-    rotational_speed_rad_per_sec = round(GravSource.rotational_speed*180/pi,10) # 弧度变角度
-    rotational_period = round(GravSource.rotational_period/3600, 3)  # 秒变时  
-    print("当前星球自转角速度", rotational_speed_rad_per_sec, "deg/s")
-    print("当前星球自转周期", rotational_period, "h")
+    
+    # 转换到表面参考系，封装好的坐标转换，但是左手系  
+    surface_axes = {}  
+    for axis_name, direction in body_axes.items():  
+        surface_axes[axis_name] = conn.space_center.transform_direction(  
+            direction, vessel_ref, surface_frame  
+        )
+    body_axes_custom={}
+    body_axes_custom['x'] = UNE2NUE(surface_axes['forward'])
+    body_axes_custom['y'] = - UNE2NUE(surface_axes['down'])
+    body_axes_custom['z'] = UNE2NUE(surface_axes['right'])  
+    
+    print("飞行器体轴在表面参考系中的表示：")  
+    for axis_name, vector in body_axes_custom.items():  
+        print(f"{axis_name}: {np.round(vector,2)}")  
+
+    
+    # distance_to_center = vessel.orbit.radius
+    # print("距地心距离：", distance_to_center/1000 ,"km")
+    # rotational_speed_rad_per_sec = round(GravSource.rotational_speed*180/pi,10) # 弧度变角度
+    # rotational_period = round(GravSource.rotational_period/3600, 3)  # 秒变时  
+    # print("当前星球自转角速度", rotational_speed_rad_per_sec, "deg/s")
+    # print("当前星球自转周期", rotational_period, "h")
     print(f"纬度: {flight.latitude:.6f}°")  
     print(f"经度: {flight.longitude:.6f}°") 
     print()
