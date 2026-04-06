@@ -32,14 +32,17 @@ class PositionPID(object):
         self._pre_error = 0  # t-1 时刻误差值
         self._integral = 0  # 误差积分值
 
-    def calculate(self, error, dt):
+    def calculate(self, error, dt, d_error=None, i_error=None):
         """
         计算t时刻PID输出值cur_val
         """
         # 比例项
         p_out = self.k_p * error
         # 积分项
-        self._integral += (error * dt)
+        if i_error is None: # 不可直接获取，再做积分
+            self._integral += (error * dt)
+        else:
+            self._integral = i_error
 
         # 仿照simple_pid，将积分项整项预先限幅
         self._integral = np.clip(self._integral, self._min/self.k_i, self._max/self.k_i) \
@@ -47,7 +50,10 @@ class PositionPID(object):
         
         i_out = self.k_i * self._integral
         # 微分项
-        derivative = (error - self._pre_error) / dt
+        if d_error is None: # 不可直接获取，再做差分
+            derivative = (error - self._pre_error) / dt
+        else:
+            derivative = d_error
         d_out = self.k_d * derivative
         # t 时刻pid输出
         output = p_out + i_out + d_out

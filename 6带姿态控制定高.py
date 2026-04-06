@@ -7,6 +7,40 @@ from coord_rotations import *
 from PIDtools import PositionPID
 
 """
+# 使用轨道参考系（惯性系）获取角速度  
+angular_velocity = vessel.angular_velocity(vessel.orbital_reference_frame)  
+  
+# 或者使用天体的非旋转参考系  
+angular_velocity = vessel.angular_velocity(vessel.orbit.body.non_rotating_reference_frame)
+import krpc  
+  
+conn = krpc.connect(name='角速度示例')  
+space_center = conn.space_center  
+vessel = space_center.active_vessel  
+  
+# 获取惯性系角速度  
+inertial_angular_velocity = vessel.angular_velocity(vessel.orbital_reference_frame)  
+print(f"惯性系角速度: {inertial_angular_velocity} rad/s")  
+  
+# 获取机体坐标系角速度  
+body_angular_velocity = vessel.angular_velocity(vessel.reference_frame)  
+print(f"机体坐标系角速度: {body_angular_velocity} rad/s")  
+  
+# 获取大小  
+angular_speed = (inertial_angular_velocity[0]**2 +   
+                inertial_angular_velocity[1]**2 +   
+                inertial_angular_velocity[2]**2)**0.5  
+print(f"角速度大小: {angular_speed} rad/s")
+
+# 将惯性系角速度转换到机体坐标系  
+transformed_velocity = space_center.transform_velocity(  
+    inertial_angular_velocity,  
+    vessel.orbital_reference_frame,  
+    vessel.reference_frame  
+)
+"""
+
+"""
 # 获取控制对象  
 control = vessel.control  
 
@@ -26,7 +60,7 @@ control.up = -0.5      # 向下平移
 control.right = 0.2    # 向右平移
 """
 
-dt = 0.1
+dt = 0.05
 
 conn = krpc.connect(name='Velocity Vectors')  
 vessel = conn.space_center.active_vessel  
@@ -36,6 +70,8 @@ control = vessel.control
 vessel_ref = vessel.reference_frame   
 # 获取表面参考系  
 surface_frame = vessel.surface_reference_frame
+# 获取惯性参考系（非旋转天体参考系）  
+inertial_frame = vessel.orbit.body.non_rotating_reference_frame
 # 使用表面参考系获取飞行数据
 flight = vessel.flight(surface_frame)  
 
@@ -49,6 +85,13 @@ pitch_gain = 1.0
 # 自动定高 PID（与 3自动定高.py 相同）
 target_height = 200.0
 height_controller = PositionPID(max=1, min=0, p=0.1, i=0, d=0.07)
+
+p_turn = 2.0
+i_turn = 0.0
+d_turn = 1.4
+yaw_pid = PositionPID(max=1, min=-1, p=p_turn, i=i_turn, d=d_turn)
+pitch_pid = PositionPID(max=1, min=-1, p=p_turn, i=i_turn, d=d_turn)
+roll_pid = PositionPID(max=1, min=-1, p=p_turn/70, i=i_turn, d=0)
 
 # 体轴基本方向  
 body_axes = {  
@@ -103,9 +146,9 @@ for i in range(int(60*5/dt)):
     # 机头指向(天北东？)
     direction0 = np.array(vessel.direction(surface_frame))
     # 机头指向(转为习惯的北天东)
-    direction = UNE2NUE(direction0)
+    direction_head = UNE2NUE(direction0)
     print("速度矢量:", np.round(velocity, 2))
-    print("机头指向:", np.round(direction, 2))
+    print("机头指向:", np.round(direction_head, 2))
     
     # 转换到表面参考系，封装好的坐标转换，但是左手系  
     surface_axes = {}  
@@ -128,13 +171,23 @@ for i in range(int(60*5/dt)):
     bz = np.array(body_axes_custom['z'])
 
     tmp = np.cross(bx, target_point_)
-    yaw_cmd = float(np.dot(tmp, by))
-    pitch_cmd = float(np.dot(tmp, bz))
-    control.yaw = float(np.clip(yaw_gain * yaw_cmd, -1.0, 1.0))
-    control.pitch = float(np.clip(pitch_gain * pitch_cmd, -1.0, 1.0))
+    
+    # 没有仔细分析理论，瞎写的
+    yaw_cmd = float(np.dot(tmp, by)*0.99999)
+    pitch_cmd = float(np.dot(tmp, bz)*0.99999)
+    
+    # control.yaw = -float(np.clip(yaw_gain * yaw_cmd, -1.0, 1.0))
+    # control.pitch = float(np.clip(pitch_gain * pitch_cmd, -1.0, 1.0))
+
+    control.yaw = yaw_pid.calculate(-yaw_cmd, dt=dt)
+    control.pitch = pitch_pid.calculate(pitch_cmd, dt=dt)
+
     # 自动定高 PID 输出油门
     surface_altitude = flight.surface_altitude
     throttle_cmd = height_controller.calculate(target_height - surface_altitude, dt=dt)
+    # 头朝下的时候强制收油门
+    if direction_head[1]<0:
+        throttle_cmd=0
     control.throttle = float(np.clip(throttle_cmd, 0.0, 1.0))
     print(f"yaw_cmd={yaw_cmd:.3f}, pitch_cmd={pitch_cmd:.3f}, throttle={control.throttle:.3f}")
 
@@ -146,6 +199,30 @@ for i in range(int(60*5/dt)):
     # print("当前星球自转周期", rotational_period, "h")
     print(f"纬度: {flight.latitude:.6f}°")  
     print(f"经度: {flight.longitude:.6f}°") 
+
+    # 获取机体坐标系角速度并打印
+    # 获取机体在惯性系中的角速度  
+    angular_velocity_inertial = vessel.angular_velocity(inertial_frame)  
+    
+    # 将角速度变换到机体坐标系  
+    angular_velocity_body = conn.space_center.transform_direction(  
+        angular_velocity_inertial, 
+        inertial_frame, 
+        vessel_ref,
+    )
+    body_ang_vel = np.zeros(3)
+    # 左后上? 到前右下pqr
+    # body_ang_vel = np.array(angular_velocity_body)
+    body_ang_vel[0] = -angular_velocity_body[1] # p
+    body_ang_vel[1] = -angular_velocity_body[0] # q
+    body_ang_vel[2] = -angular_velocity_body[2] # r
+
+    control.roll = roll_pid.calculate(-body_ang_vel[0]*180/pi, dt=dt)
+
+    body_ang_speed = np.linalg.norm(body_ang_vel)
+
+    print("机体坐标系角速度:", np.round(body_ang_vel)*180/pi, "deg/s, 大小:", round(body_ang_speed, 6))
+
     print()
     time.sleep(dt)
 
