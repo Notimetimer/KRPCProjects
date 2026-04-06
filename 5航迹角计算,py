@@ -1,0 +1,54 @@
+import krpc  
+import math  
+import time  
+  
+conn = krpc.connect(name='Body Center Tracking')  
+vessel = conn.space_center.active_vessel  
+space_center = conn.space_center  
+  
+# 获取参考系  
+surface_frame = vessel.surface_reference_frame  
+body = vessel.orbit.body  
+  
+# 星球质心在表面参考系中的位置和速度  
+def get_body_center_motion():  
+    # 获取星球质心在表面参考系中的位置  
+    body_position = body.position(surface_frame)  
+      
+    # 获取星球质心在表面参考系中的速度  
+    # 使用transform_velocity方法，位置为星球质心，速度为0（在星球参考系中）  
+    body_velocity = space_center.transform_velocity(  
+        body_position, (0, 0, 0),   
+        body.reference_frame, surface_frame  
+    )  
+      
+    return body_position, body_velocity  
+  
+# 计算航迹角  
+def calculate_track_angle_from_body_motion(body_velocity):  
+    # 星球质心的运动与飞行器运动相反  
+    vessel_velocity = (-body_velocity[0], -body_velocity[1], -body_velocity[2])  
+      
+    # 提取水平分量（Y轴向北，Z轴向东）  
+    north_component = vessel_velocity[1]  
+    east_component = vessel_velocity[2]  
+      
+    if north_component == 0 and east_component == 0:  
+        return 0  
+      
+    angle = math.atan2(east_component, north_component) * (180.0 / math.pi)  
+    if angle < 0:  
+        angle += 360  
+    return angle  
+  
+# 循环监测  
+while True:  
+    body_pos, body_vel = get_body_center_motion()  
+    track_angle = calculate_track_angle_from_body_motion(body_vel)  
+      
+    print(f"星球质心位置: {body_pos}")  
+    print(f"星球质心速度: {body_vel}")  
+    print(f"飞行器航迹角: {track_angle:.2f}°")  
+    print("---")  
+      
+    time.sleep(0.1)
