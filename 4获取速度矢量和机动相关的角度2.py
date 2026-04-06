@@ -71,7 +71,7 @@ vessel = conn.space_center.active_vessel
 GravSource = vessel.orbit.body
 control = vessel.control    
 # 获取表面参考系  
-s_frame = vessel.surface_reference_frame 
+s_frame = vessel.surface_reference_frame
 # 使用表面参考系获取飞行数据
 flight = vessel.flight(s_frame)  
 
@@ -79,8 +79,6 @@ def transform_surface_velocity(velocity_vec, longitude=0, latitude=0):
     # 经纬度为角度制
     v = np.array(velocity_vec, copy=True)
     v[2] = -v[2]
-    if abs(latitude) > 90 - 1e-1:
-        longitude = 0
     v = passive_rotation(v, -longitude*pi/180, latitude*pi/180)
     out = np.zeros(3)
     out[0] = v[1]
@@ -96,19 +94,24 @@ for i in range(int(60*5/dt)):
     orbital_frame = GravSource.non_rotating_reference_frame  
     orbital_vel = vessel.flight(orbital_frame).velocity
     
-    # # 相对地表速度？  东，北，地？不对，是相对旋转地表的速度, 上北东？
-    # surface_frame = GravSource.reference_frame  
-    # surface_vel = vessel.flight(surface_frame).velocity  
+    # 相对地表速度？  东，北，地？不对，是相对旋转地表的速度, 上北东？
+    surface_frame = GravSource.reference_frame  
+    surface_vel = vessel.flight(surface_frame).velocity  
 
     # 左手系速度（0E, N, 90E）
-    velocity0 = np.array(s_frame)
+    velocity0 = np.array(surface_vel)
     
     # 速度转到地表系
     velocity = transform_surface_velocity(velocity0, flight.longitude, flight.latitude)
 
 
-    # 机头指向()
-    direction = np.array(vessel.direction(s_frame))
+    # 机头指向(天北东？)
+    direction0 = np.array(vessel.direction(s_frame))
+    # 机头指向(转为习惯的北天东)
+    direction = np.zeros(3)
+    direction[0] = direction0[1]
+    direction[1] = direction0[0]
+    direction[2] = direction0[2]
     
 
     print("速度矢量:", np.round(velocity, 2))
