@@ -106,6 +106,9 @@ for i in range(int(120/dt)):
     bx = np.array(body_axes_custom['x'])
     by = np.array(body_axes_custom['y'])
     bz = np.array(body_axes_custom['z'])
+    
+    # 归一化
+    target_point_ = target_point_/(np.linalg.norm(target_point_)+1e-5)
 
     tmp = np.cross(bx, target_point_)
     

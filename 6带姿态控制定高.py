@@ -5,7 +5,7 @@ import math
 from math import *
 from coord_rotations import *
 from PIDtools import PositionPID
-
+from numpy.linalg import norm
 """
 # 使用轨道参考系（惯性系）获取角速度  
 angular_velocity = vessel.angular_velocity(vessel.orbital_reference_frame)  
@@ -170,14 +170,34 @@ for i in range(int(60*5/dt)):
     by = np.array(body_axes_custom['y'])
     bz = np.array(body_axes_custom['z'])
 
+    # 归一化
+    target_point_ = target_point_/(np.linalg.norm(target_point_)+1e-5)
+
     tmp = np.cross(bx, target_point_)
     
     # 没有仔细分析理论，瞎写的
     yaw_cmd = float(np.dot(tmp, by)*0.99999)
     pitch_cmd = float(np.dot(tmp, bz)*0.99999)
-    
-    # control.yaw = -float(np.clip(yaw_gain * yaw_cmd, -1.0, 1.0))
-    # control.pitch = float(np.clip(pitch_gain * pitch_cmd, -1.0, 1.0))
+
+    # 认真算了差角效果却更差，为啥？
+    # L_ = target_point_
+    # # 俯仰误差角
+    # L_xy_b_ = L_ - np.dot(L_, bz) * bz / (norm(bz)+1e-8)
+    # x_b_2L_xy_b_ = np.cross(bx, L_xy_b_) / (norm(L_xy_b_)+1e-8) # 省略一个norm
+    # x_b_2L_xy_b_sin = np.dot(x_b_2L_xy_b_, bz)
+    # x_b_2L_xy_b_cos = np.dot(bx, L_xy_b_) / (norm(L_xy_b_)+1e-8) # 省略一个norm
+    # delta_z_angle = np.arctan2(x_b_2L_xy_b_sin, x_b_2L_xy_b_cos)
+    # # 偏航误差角
+    # L_xz_b_ = L_ - np.dot(L_, by) * by / (norm(by)+1e-8)
+    # x_b_2L_xz_b_ = np.cross(bx, L_xz_b_) / (norm(L_xz_b_)+1e-8) # 省略一个norm
+    # x_b_2L_xz_b_sin = np.dot(x_b_2L_xz_b_, by)
+    # x_b_2L_xz_b_cos = np.dot(bx, L_xz_b_) / (norm(L_xz_b_)+1e-8)
+    # delta_y_angle = np.arctan2(x_b_2L_xz_b_sin, x_b_2L_xz_b_cos)
+    # # 滚转方向上暂时没有目标滚转方向，待续
+
+    # pitch_cmd = delta_z_angle/pi
+    # yaw_cmd = delta_y_angle/pi
+
 
     control.yaw = yaw_pid.calculate(-yaw_cmd, dt=dt)
     control.pitch = pitch_pid.calculate(pitch_cmd, dt=dt)
