@@ -80,7 +80,7 @@ def transform_surface_velocity(velocity_vec, longitude=0, latitude=0):
     v = np.array(velocity_vec, copy=True)
     v[2] = -v[2]
     if abs(latitude) > 90 - 1e-1:
-        latitude = 0
+        longitude = 0
     v = passive_rotation(v, -longitude*pi/180, latitude*pi/180)
     out = np.zeros(3)
     out[0] = v[1]
