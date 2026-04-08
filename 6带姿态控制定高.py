@@ -6,6 +6,8 @@ from math import *
 from coord_rotations import *
 from PIDtools import PositionPID
 from numpy.linalg import norm
+import keyboard
+import copy
 """
 # 使用轨道参考系（惯性系）获取角速度  
 angular_velocity = vessel.angular_velocity(vessel.orbital_reference_frame)  
@@ -88,7 +90,7 @@ height_controller = PositionPID(max=1, min=0, p=0.1, i=0, d=0.07)
 
 p_turn = 2.0
 i_turn = 0.0
-d_turn = 1.4
+d_turn = 1.6 # 1.4
 yaw_pid = PositionPID(max=1, min=-1, p=p_turn, i=i_turn, d=d_turn)
 pitch_pid = PositionPID(max=1, min=-1, p=p_turn, i=i_turn, d=d_turn)
 roll_pid = PositionPID(max=1, min=-1, p=p_turn/70, i=i_turn, d=0)
@@ -164,62 +166,7 @@ for i in range(int(60*5/dt)):
     print("飞行器体轴在表面参考系中的表示：")  
     for axis_name, vector in body_axes_custom.items():  
         print(f"{axis_name}: {np.round(vector,2)}")  
-
-    # 姿态控制：基于 body_axes_custom 与 target_point_
-    bx = np.array(body_axes_custom['x'])
-    by = np.array(body_axes_custom['y'])
-    bz = np.array(body_axes_custom['z'])
-
-    # 归一化
-    target_point_ = target_point_/(np.linalg.norm(target_point_)+1e-5)
-
-    tmp = np.cross(bx, target_point_)
     
-    # 没有仔细分析理论，瞎写的
-    yaw_cmd = float(np.dot(tmp, by)*0.99999)
-    pitch_cmd = float(np.dot(tmp, bz)*0.99999)
-
-    # 认真算了差角效果却更差，为啥？
-    # L_ = target_point_
-    # # 俯仰误差角
-    # L_xy_b_ = L_ - np.dot(L_, bz) * bz / (norm(bz)+1e-8)
-    # x_b_2L_xy_b_ = np.cross(bx, L_xy_b_) / (norm(L_xy_b_)+1e-8) # 省略一个norm
-    # x_b_2L_xy_b_sin = np.dot(x_b_2L_xy_b_, bz)
-    # x_b_2L_xy_b_cos = np.dot(bx, L_xy_b_) / (norm(L_xy_b_)+1e-8) # 省略一个norm
-    # delta_z_angle = np.arctan2(x_b_2L_xy_b_sin, x_b_2L_xy_b_cos)
-    # # 偏航误差角
-    # L_xz_b_ = L_ - np.dot(L_, by) * by / (norm(by)+1e-8)
-    # x_b_2L_xz_b_ = np.cross(bx, L_xz_b_) / (norm(L_xz_b_)+1e-8) # 省略一个norm
-    # x_b_2L_xz_b_sin = np.dot(x_b_2L_xz_b_, by)
-    # x_b_2L_xz_b_cos = np.dot(bx, L_xz_b_) / (norm(L_xz_b_)+1e-8)
-    # delta_y_angle = np.arctan2(x_b_2L_xz_b_sin, x_b_2L_xz_b_cos)
-    # # 滚转方向上暂时没有目标滚转方向，待续
-
-    # pitch_cmd = delta_z_angle/pi
-    # yaw_cmd = delta_y_angle/pi
-
-
-    control.yaw = yaw_pid.calculate(-yaw_cmd, dt=dt)
-    control.pitch = pitch_pid.calculate(pitch_cmd, dt=dt)
-
-    # 自动定高 PID 输出油门
-    surface_altitude = flight.surface_altitude
-    throttle_cmd = height_controller.calculate(target_height - surface_altitude, dt=dt)
-    # 头朝下的时候强制收油门
-    if direction_head[1]<0:
-        throttle_cmd=0
-    control.throttle = float(np.clip(throttle_cmd, 0.0, 1.0))
-    print(f"yaw_cmd={yaw_cmd:.3f}, pitch_cmd={pitch_cmd:.3f}, throttle={control.throttle:.3f}")
-
-    # distance_to_center = vessel.orbit.radius
-    # print("距地心距离：", distance_to_center/1000 ,"km")
-    # rotational_speed_rad_per_sec = round(GravSource.rotational_speed*180/pi,10) # 弧度变角度
-    # rotational_period = round(GravSource.rotational_period/3600, 3)  # 秒变时  
-    # print("当前星球自转角速度", rotational_speed_rad_per_sec, "deg/s")
-    # print("当前星球自转周期", rotational_period, "h")
-    print(f"纬度: {flight.latitude:.6f}°")  
-    print(f"经度: {flight.longitude:.6f}°") 
-
     # 获取机体坐标系角速度并打印
     # 获取机体在惯性系中的角速度  
     angular_velocity_inertial = vessel.angular_velocity(inertial_frame)  
@@ -236,13 +183,98 @@ for i in range(int(60*5/dt)):
     body_ang_vel[0] = -angular_velocity_body[1] # p
     body_ang_vel[1] = -angular_velocity_body[0] # q
     body_ang_vel[2] = -angular_velocity_body[2] # r
+    p,q,r = body_ang_vel
 
-    control.roll = roll_pid.calculate(-body_ang_vel[0]*180/pi, dt=dt)
+    if keyboard.is_pressed('e'):
+        control.roll = 1
+    elif keyboard.is_pressed('q'):
+        control.roll = -1
+    else:
+        control.roll = roll_pid.calculate(-body_ang_vel[0]*180/pi, dt=dt)
 
     body_ang_speed = np.linalg.norm(body_ang_vel)
 
     print("机体坐标系角速度:", np.round(body_ang_vel)*180/pi, "deg/s, 大小:", round(body_ang_speed, 6))
 
+    # 姿态控制：基于 body_axes_custom 与 target_point_
+    bx = np.array(body_axes_custom['x'])
+    by = np.array(body_axes_custom['y'])
+    bz = np.array(body_axes_custom['z'])
+
+    # 归一化
+    target_point_ = target_point_/(np.linalg.norm(target_point_)+1e-5)
+    
+    # # 特殊处理
+    temp = copy.deepcopy(bx)*0.9 + copy.deepcopy(target_point_) # 拷贝数值
+    target_point_1 = temp/(norm(temp)+1e-5) # 重新引用
+
+    # 1
+    tmp = np.cross(bx, target_point_1)
+    print("target_point_", target_point_1)
+
+    # 瞎写的，效果竟然挺好
+    yaw_cmd = float(np.dot(tmp, by)*0.99999) *2
+    pitch_cmd = float(np.dot(tmp, bz)*0.99999) *2
+
+
+    # # 按键映射覆盖：w/s 控制 pitch，a/d 控制 yaw，e/q 控制 roll，z/x 控制油门
+    # if keyboard.is_pressed('w'):
+    #     control.pitch = -1
+    # elif keyboard.is_pressed('s'):
+    #     control.pitch = 1
+    # else:
+    control.pitch = pitch_pid.calculate(pitch_cmd, dt=dt, d_error=-q)
+
+    # if keyboard.is_pressed('a'):
+    #     control.yaw = -1
+    # elif keyboard.is_pressed('d'):
+    #     control.yaw = 1
+    # else:
+    control.yaw = yaw_pid.calculate(-yaw_cmd, dt=dt, d_error=-r)
+
+    # 自动定高 PID 输出油门
+    surface_altitude = flight.surface_altitude
+    throttle_cmd = height_controller.calculate(target_height - surface_altitude, dt=dt)
+    # 头朝下的时候强制收油门
+    if direction_head[1]<0:
+        throttle_cmd=0
+    if keyboard.is_pressed('z'):
+        control.throttle = 1.0
+    elif keyboard.is_pressed('x'):
+        control.throttle = 0.0
+    else:
+        control.throttle = float(np.clip(throttle_cmd, 0.0, 1.0))
+    print(f"yaw_cmd={yaw_cmd:.3f}, pitch_cmd={pitch_cmd:.3f}, throttle={control.throttle:.3f}")
+
+    # distance_to_center = vessel.orbit.radius
+    # print("距地心距离：", distance_to_center/1000 ,"km")
+    # rotational_speed_rad_per_sec = round(GravSource.rotational_speed*180/pi,10) # 弧度变角度
+    # rotational_period = round(GravSource.rotational_period/3600, 3)  # 秒变时  
+    # print("当前星球自转角速度", rotational_speed_rad_per_sec, "deg/s")
+    # print("当前星球自转周期", rotational_period, "h")
+    print(f"纬度: {flight.latitude:.6f}°")  
+    print(f"经度: {flight.longitude:.6f}°") 
+
+
     print()
     time.sleep(dt)
 
+
+    # # 2
+    # # 使用带符号角（signed angle）在两个轴上计算最短旋转角, 几何上计算的角度正确，但控制效果不稳定
+    # L_ = target_point_
+    # # 俯仰误差角
+    # L_xy_b_ = L_ - np.dot(L_, bz) * bz / (norm(bz)+1e-8)
+    # x_b_2L_xy_b_ = np.cross(bx, L_xy_b_) / (norm(L_xy_b_)+1e-8) # 省略一个norm
+    # x_b_2L_xy_b_sin = np.dot(x_b_2L_xy_b_, bz)
+    # x_b_2L_xy_b_cos = np.dot(bx, L_xy_b_) / (norm(L_xy_b_)+1e-8) # 省略一个norm
+    # delta_z_angle = np.arctan2(x_b_2L_xy_b_sin, x_b_2L_xy_b_cos)
+    # # 偏航误差角
+    # L_xz_b_ = L_ - np.dot(L_, by) * by / (norm(by)+1e-8)
+    # x_b_2L_xz_b_ = np.cross(bx, L_xz_b_) / (norm(L_xz_b_)+1e-8) # 省略一个norm
+    # x_b_2L_xz_b_sin = np.dot(x_b_2L_xz_b_, by)
+    # x_b_2L_xz_b_cos = np.dot(bx, L_xz_b_) / (norm(L_xz_b_)+1e-8)
+    # delta_y_angle = np.arctan2(x_b_2L_xz_b_sin, x_b_2L_xz_b_cos)
+    # # 滚转方向上暂时没有目标滚转方向，待续
+    # pitch_cmd = delta_z_angle
+    # yaw_cmd = delta_y_angle
