@@ -87,7 +87,7 @@ yaw_gain = 1.0
 pitch_gain = 1.0
 
 # 自动定高 PID（与 3自动定高.py 相同）
-target_height = 20.0
+target_height = 50.0
 height_controller = PositionPID(max=1, min=0, p=0.1, i=0, d=0.07)
 
 # 水平减速参数
@@ -248,6 +248,9 @@ for i in range(int(60*5/dt)):
         throttle_cmd=0
     if keyboard.is_pressed('z'):
         control.throttle = 1.0
+        control.yaw = 0.0
+        control.pitch = 0.0
+
     elif keyboard.is_pressed('x'):
         control.throttle = 0.0
     else:
@@ -263,6 +266,15 @@ for i in range(int(60*5/dt)):
     print(f"纬度: {vessel.flight(surface_frame).latitude:.6f}°")  
     print(f"经度: {vessel.flight(surface_frame).longitude:.6f}°")
 
-    
+    # 当前推重比
+    current_twr = vessel.thrust / (vessel.mass * vessel.orbit.body.surface_gravity)
+    # 最大推重比
+    max_twr = vessel.available_thrust / (vessel.mass * vessel.orbit.body.surface_gravity)
+    print("推重比：", current_twr, "/", max_twr)
+    # 真空比冲
+    vacuum_isp = vessel.vacuum_specific_impulse
+    # 海平面比冲
+    sea_level_isp = vessel.kerbin_sea_level_specific_impulse
+    print("比冲：", vacuum_isp, sea_level_isp)
     print()
     time.sleep(dt)

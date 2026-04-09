@@ -195,7 +195,7 @@ for i in range(int(120/dt)):
     
     # 期望下降速度
     if surface_altitude > 150:
-        target_descend_speed = np.clip(surface_altitude/100, 0, 1)*-50
+        target_descend_speed = max(np.clip(surface_altitude/100, 0, 1)*-50, -300)
     elif surface_altitude > 20:
         target_descend_speed = np.clip(surface_altitude/100, 0, 1)*-10
     else:
