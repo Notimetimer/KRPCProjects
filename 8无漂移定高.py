@@ -87,7 +87,7 @@ yaw_gain = 1.0
 pitch_gain = 1.0
 
 # 自动定高 PID（与 3自动定高.py 相同）
-target_height = 200.0
+target_height = 20.0
 height_controller = PositionPID(max=1, min=0, p=0.1, i=0, d=0.07)
 
 # 水平减速参数
