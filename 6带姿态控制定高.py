@@ -62,7 +62,7 @@ control.up = -0.5      # 向下平移
 control.right = 0.2    # 向右平移
 """
 
-dt = 0.05
+
 
 conn = krpc.connect(name='Velocity Vectors')  
 vessel = conn.space_center.active_vessel  
@@ -74,8 +74,10 @@ vessel_ref = vessel.reference_frame
 surface_frame = vessel.surface_reference_frame
 # 获取惯性参考系（非旋转天体参考系）  
 inertial_frame = vessel.orbit.body.non_rotating_reference_frame
-# 使用表面参考系获取飞行数据
-flight = vessel.flight(surface_frame)  
+# # 使用表面参考系获取飞行数据
+# flight = vessel.flight(surface_frame)
+
+dt = 0.05
 
 # 期望指向（北-天-东坐标系）
 target_point_ = np.array([0, 1, 0])
@@ -126,7 +128,6 @@ def transform_surface_velocity(velocity_vec, longitude=0, latitude=0):
     out[2] = -v[2]
     return out
 
-
 for i in range(int(60*5/dt)):
     # 获取速度矢量
     
@@ -141,11 +142,12 @@ for i in range(int(60*5/dt)):
     # 左手系速度（0E, N, 90E）
     velocity0 = np.array(surface_vel)
     
-    # 速度转到地表系
-    velocity = transform_surface_velocity(velocity0, flight.longitude, flight.latitude)
+    # 速度转到地表系（北天东）
+    velocity = transform_surface_velocity(velocity0, 
+                                          vessel.flight(surface_frame).longitude, 
+                                          vessel.flight(surface_frame).latitude)
 
-
-    # 机头指向(天北东？)
+    # 机头指向(天北东顺序)
     direction0 = np.array(vessel.direction(surface_frame))
     # 机头指向(转为习惯的北天东)
     direction_head = UNE2NUE(direction0)
@@ -161,13 +163,16 @@ for i in range(int(60*5/dt)):
     body_axes_custom={}
     body_axes_custom['x'] = UNE2NUE(surface_axes['forward'])
     body_axes_custom['y'] = - UNE2NUE(surface_axes['down'])
-    body_axes_custom['z'] = UNE2NUE(surface_axes['right'])  
+    body_axes_custom['z'] = UNE2NUE(surface_axes['right'])
+    # 姿态控制：基于 body_axes_custom 与 target_point_
+    bx = np.array(body_axes_custom['x'])
+    by = np.array(body_axes_custom['y'])
+    bz = np.array(body_axes_custom['z'])
+
+    # print("飞行器体轴在表面参考系中的表示：")  
+    # for axis_name, vector in body_axes_custom.items():  
+    #     print(f"{axis_name}: {np.round(vector,2)}")  
     
-    print("飞行器体轴在表面参考系中的表示：")  
-    for axis_name, vector in body_axes_custom.items():  
-        print(f"{axis_name}: {np.round(vector,2)}")  
-    
-    # 获取机体坐标系角速度并打印
     # 获取机体在惯性系中的角速度  
     angular_velocity_inertial = vessel.angular_velocity(inertial_frame)  
     
@@ -194,23 +199,18 @@ for i in range(int(60*5/dt)):
 
     body_ang_speed = np.linalg.norm(body_ang_vel)
 
-    print("机体坐标系角速度:", np.round(body_ang_vel)*180/pi, "deg/s, 大小:", round(body_ang_speed, 6))
-
-    # 姿态控制：基于 body_axes_custom 与 target_point_
-    bx = np.array(body_axes_custom['x'])
-    by = np.array(body_axes_custom['y'])
-    bz = np.array(body_axes_custom['z'])
+    # print("机体坐标系角速度:", np.round(body_ang_vel)*180/pi, "deg/s, 大小:", round(body_ang_speed, 6))
 
     # 归一化
     target_point_ = target_point_/(np.linalg.norm(target_point_)+1e-5)
     
-    # # 特殊处理
+    # # 变换，防止bx与期望之间角度为钝角
     temp = copy.deepcopy(bx)*0.9 + copy.deepcopy(target_point_) # 拷贝数值
     target_point_1 = temp/(norm(temp)+1e-5) # 重新引用
 
     # 1
     tmp = np.cross(bx, target_point_1)
-    print("target_point_", target_point_1)
+    # print("target_point_", target_point_1)
 
     # 瞎写的，效果竟然挺好
     yaw_cmd = float(np.dot(tmp, by)*0.99999) *2
@@ -233,7 +233,7 @@ for i in range(int(60*5/dt)):
     control.yaw = yaw_pid.calculate(-yaw_cmd, dt=dt, d_error=-r)
 
     # 自动定高 PID 输出油门
-    surface_altitude = flight.surface_altitude
+    surface_altitude = vessel.flight(surface_frame).surface_altitude
     throttle_cmd = height_controller.calculate(target_height - surface_altitude, dt=dt)
     # 头朝下的时候强制收油门
     if direction_head[1]<0:
@@ -252,15 +252,15 @@ for i in range(int(60*5/dt)):
     # rotational_period = round(GravSource.rotational_period/3600, 3)  # 秒变时  
     # print("当前星球自转角速度", rotational_speed_rad_per_sec, "deg/s")
     # print("当前星球自转周期", rotational_period, "h")
-    print(f"纬度: {flight.latitude:.6f}°")  
-    print(f"经度: {flight.longitude:.6f}°") 
+    print(f"纬度: {vessel.flight(surface_frame).latitude:.6f}°")  
+    print(f"经度: {vessel.flight(surface_frame).longitude:.6f}°")
 
-
+    
     print()
     time.sleep(dt)
 
 
-    # # 2
+    # # 2 经典错误，会造成不稳定的姿态控制写法
     # # 使用带符号角（signed angle）在两个轴上计算最短旋转角, 几何上计算的角度正确，但控制效果不稳定
     # L_ = target_point_
     # # 俯仰误差角

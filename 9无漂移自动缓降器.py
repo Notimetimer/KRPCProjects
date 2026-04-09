@@ -24,11 +24,15 @@ inertial_frame = vessel.orbit.body.non_rotating_reference_frame
 dt = 0.05
 
 # 期望指向（北-天-东坐标系）
-target_point_ = np.array([0, 1, 0])
+target_point_0 = np.array([0, 1, 0], dtype='float64')
 
 # 姿态控制增益
 yaw_gain = 1.0
 pitch_gain = 1.0
+
+
+# 水平减速参数
+hor_controller = PositionPID(max=0.3, min=0, p=0.1, i=0, d=0.07)
 
 p_turn = 2.0
 i_turn = 0.0
@@ -77,22 +81,27 @@ for i in range(int(120/dt)):
     
     # 相对地表速度？  东，北，地？不对，是相对旋转地表的速度, 上北东？
     Globe_frame = GravSource.reference_frame  
-    surface_vel = vessel.flight(Globe_frame).velocity  
+    surface_vel = vessel.flight(Globe_frame).velocity
 
     # 左手系速度（0E, N, 90E）
     velocity0 = np.array(surface_vel)
     
-    # 速度转到地表系
+    # 速度转到地表系（北天东）
     velocity = transform_surface_velocity(velocity0, 
                                           vessel.flight(surface_frame).longitude, 
                                           vessel.flight(surface_frame).latitude)
 
-    # 机头指向(天北东？)
+    # 机头指向(天北东顺序)
     direction0 = np.array(vessel.direction(surface_frame))
     # 机头指向(转为习惯的北天东)
     direction_head = UNE2NUE(direction0)
     print("速度矢量:", np.round(velocity, 2))
     print("机头指向:", np.round(direction_head, 2))
+
+    # 目标指向考虑减速
+    v_hor = float((velocity[0]**2 + velocity[2]**2)**0.5) # 水平分速度大小
+
+    target_point_ = target_point_0 - hor_controller.calculate(v_hor, dt=dt) * np.array([velocity[0], 0.0, velocity[2]])/(v_hor+1e-5)
     
     # 转换到表面参考系，封装好的坐标转换，但是左手系  
     surface_axes = {}  
@@ -135,7 +144,7 @@ for i in range(int(120/dt)):
 
     body_ang_speed = np.linalg.norm(body_ang_vel)
 
-    print("机体坐标系角速度:", np.round(body_ang_vel)*180/pi, "deg/s, 大小:", round(body_ang_speed, 6))
+    # print("机体坐标系角速度:", np.round(body_ang_vel)*180/pi, "deg/s, 大小:", round(body_ang_speed, 6))
 
     # 归一化
     target_point_ = target_point_/(np.linalg.norm(target_point_)+1e-5)
@@ -146,7 +155,7 @@ for i in range(int(120/dt)):
 
     # 1
     tmp = np.cross(bx, target_point_1)
-    print("target_point_", target_point_1)
+    # print("target_point_", target_point_1)
 
     # 瞎写的，效果竟然挺好
     yaw_cmd = float(np.dot(tmp, by)*0.99999) *2
