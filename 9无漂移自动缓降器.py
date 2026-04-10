@@ -9,6 +9,7 @@ from numpy.linalg import norm
 import keyboard
 import copy
 conn = krpc.connect(name='Flight Data')  
+
 vessel = conn.space_center.active_vessel  
 GravSource = vessel.orbit.body
 control = vessel.control  
@@ -18,17 +19,12 @@ vessel_ref = vessel.reference_frame
 surface_frame = vessel.surface_reference_frame
 # 获取惯性参考系（非旋转天体参考系）  
 inertial_frame = vessel.orbit.body.non_rotating_reference_frame
-# # 使用表面参考系获取飞行数据
-# flight = vessel.flight(surface_frame)
+
 
 dt = 0.05
 
 # 期望指向（北-天-东坐标系）
 target_point_0 = np.array([0, 1, 0], dtype='float64')
-
-# 姿态控制增益
-yaw_gain = 1.0
-pitch_gain = 1.0
 
 
 # 水平减速参数
@@ -46,7 +42,7 @@ body_axes = {
     'forward': (0, 1, 0),  # 机头  
     'right': (1, 0, 0),    # 右侧  
     'down': (0, 0, 1)      # 下方  
-}  
+}
 body_axes_custom = {
     'x': None, # 前
     'y': None, # 上

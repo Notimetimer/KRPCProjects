@@ -146,7 +146,7 @@ for i in range(int(60*5/dt)):
     velocity0 = np.array(surface_vel)
     
     # 速度转到地表系（北天东）
-    velocity = transform_surface_velocity(velocity0, 
+    velocity_surf = transform_surface_velocity(velocity0, 
                                           vessel.flight(surface_frame).longitude, 
                                           vessel.flight(surface_frame).latitude)
 
@@ -154,13 +154,13 @@ for i in range(int(60*5/dt)):
     direction0 = np.array(vessel.direction(surface_frame))
     # 机头指向(转为习惯的北天东)
     direction_head = UNE2NUE(direction0)
-    print("速度矢量:", np.round(velocity, 2))
+    print("速度矢量:", np.round(velocity_surf, 2))
     print("机头指向:", np.round(direction_head, 2))
 
     # 目标指向考虑减速
-    v_hor = float((velocity[0]**2 + velocity[2]**2)**0.5) # 水平分速度大小
+    v_hor = float((velocity_surf[0]**2 + velocity_surf[2]**2)**0.5) # 水平分速度大小
 
-    target_point_ = target_point_0 - hor_controller.calculate(v_hor, dt=dt) * np.array([velocity[0], 0.0, velocity[2]])/(v_hor+1e-5)
+    target_point_ = target_point_0 - hor_controller.calculate(v_hor, dt=dt) * np.array([velocity_surf[0], 0.0, velocity_surf[2]])/(v_hor+1e-5)
     
     # 转换到表面参考系，封装好的坐标转换，但是左手系  
     surface_axes = {}  
