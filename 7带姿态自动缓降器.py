@@ -142,11 +142,11 @@ for i in range(int(120/dt)):
     
     # # 变换，防止bx与期望之间角度为钝角
     temp = copy.deepcopy(bx)*0.9 + copy.deepcopy(target_point_) # 拷贝数值
-    target_point_1 = temp/(norm(temp)+1e-5) # 重新引用
+    target_point1_ = temp/(norm(temp)+1e-5) # 重新引用
 
     # 1
-    tmp = np.cross(bx, target_point_1)
-    print("target_point_", target_point_1)
+    tmp = np.cross(bx, target_point1_)
+    print("target_point_", target_point1_)
 
     # 瞎写的，效果竟然挺好
     yaw_cmd = float(np.dot(tmp, by)*0.99999) *2

@@ -80,7 +80,7 @@ inertial_frame = vessel.orbit.body.non_rotating_reference_frame
 dt = 0.05
 
 # 期望指向（北-天-东坐标系）
-target_point_0 = np.array([0, 1, 0], dtype='float64')
+target_point0_ = np.array([0, 1, 0], dtype='float64')
 
 # 姿态控制增益
 yaw_gain = 1.0
@@ -160,7 +160,7 @@ for i in range(int(60*5/dt)):
     # 目标指向考虑减速
     v_hor = float((velocity_surf[0]**2 + velocity_surf[2]**2)**0.5) # 水平分速度大小
 
-    target_point_ = target_point_0 - hor_controller.calculate(v_hor, dt=dt) * np.array([velocity_surf[0], 0.0, velocity_surf[2]])/(v_hor+1e-5)
+    target_point_ = target_point0_ - hor_controller.calculate(v_hor, dt=dt) * np.array([velocity_surf[0], 0.0, velocity_surf[2]])/(v_hor+1e-5)
     
     # 转换到表面参考系，封装好的坐标转换，但是左手系  
     surface_axes = {}  
@@ -214,11 +214,11 @@ for i in range(int(60*5/dt)):
     
     # # 变换，防止bx与期望之间角度为钝角
     temp = copy.deepcopy(bx)*0.9 + copy.deepcopy(target_point_) # 拷贝数值
-    target_point_1 = temp/(norm(temp)+1e-5) # 重新引用
+    target_point1_ = temp/(norm(temp)+1e-5) # 重新引用
 
     # 1
-    tmp = np.cross(bx, target_point_1)
-    # print("target_point_", target_point_1)
+    tmp = np.cross(bx, target_point1_)
+    # print("target_point_", target_point1_)
 
     # 瞎写的，效果竟然挺好
     yaw_cmd = float(np.dot(tmp, by)*0.99999) *2

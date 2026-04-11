@@ -8,6 +8,12 @@ from PIDtools import PositionPID
 from numpy.linalg import norm
 import keyboard
 import copy
+
+# 新增导入
+import tkinter as tk
+from tkinter import ttk
+import threading
+
 conn = krpc.connect(name='Flight Data')
 
 space_center = conn.space_center
@@ -151,6 +157,15 @@ class rocket_control(object):
         self.pitch_rad = self.pitch_angle * pi/180
         self.heading_rad = self.heading_angle * pi/180
         self.roll_rad = self.roll_angle * pi/180
+    
+    def shut_down(self, dt=0.05):
+        self.control.throttle = 0
+        self.control.pitch = 0
+        self.control.yaw = 0
+        self.control.roll = 0
+    
+    def empty_control(self, dt=0.05):
+        pass
 
     # 自动缓降
     def fast_landing_controll(self, dt=0.05):
@@ -170,11 +185,11 @@ class rocket_control(object):
         # 启动最大推力高度
         h_max_thrust = (self.vertical_speed**2)/(2*self.g*(self.max_twr * sin(self.pitch_rad) - 1)) * 1.2 # 安全高度倍率
 
-        print("垂直速度", self.vertical_speed)
-        print("对地速度", self.speed_surf)
-        print("当前高度", self.surface_altitude)
-        print("最大推力高度", h_max_thrust)
-        print()
+        # print("垂直速度", self.vertical_speed)
+        # print("对地速度", self.speed_surf)
+        # print("当前高度", self.surface_altitude)
+        # print("最大推力高度", h_max_thrust)
+        # print()
 
         # 高于最大推力高度时， 优先控制姿态
         if self.surface_altitude > max(h_max_thrust, 50):
@@ -372,9 +387,122 @@ class rocket_control(object):
             control.throttle = float(np.clip(throttle_cmd, 0.0, 1.0))
         # print(f"yaw_cmd={yaw_cmd:.3f}, pitch_cmd={pitch_cmd:.3f}, throttle={control.throttle:.3f}")
 
+# 新增界面类
+class RocketControlGUI:
+    def __init__(self, root, rocket_list):
+        self.root = root
+        self.rocket_list = rocket_list
+        self.root.title("KSP 编队多线程控制终端")
+        self.root.geometry("320x450")
+        self.root.attributes("-topmost", True) # 窗口置顶，方便在 KSP 运行期间观察
+        
+        # 状态变量
+        self.current_mode = tk.StringVar(value="CUT")  # 默认切断控制
+        self.target_height_var = tk.StringVar(value="100")
+        self.dt = 0.05
+        
+        # --- 修复点：必须先定义 running，后面的线程才能跑起来 ---
+        self.running = True 
+        # ----------------------------------------------------
+        self.setup_ui()
+        
+        # --- 核心改进：为每艘船分配独立线程 ---
+        self.control_threads = []
+        for rocket in self.rocket_list:
+            t = threading.Thread(
+                target=self.single_rocket_thread, 
+                args=(rocket,), 
+                daemon=True
+            )
+            t.start()
+            self.control_threads.append(t)
+
+    def setup_ui(self):
+        style = ttk.Style()
+        style.configure("TLabel", font=("Microsoft YaHei", 10))
+        
+        # 设定高度输入
+        frame_input = ttk.LabelFrame(self.root, text=" 参数设定 ", padding=15)
+        frame_input.pack(fill="x", padx=15, pady=10)
+        
+        ttk.Label(frame_input, text="目标高度 (m):").pack(side="left")
+        self.entry_height = ttk.Entry(frame_input, textvariable=self.target_height_var, width=12)
+        self.entry_height.pack(side="right", padx=5)
+        # 模式控制开关
+        frame_btns = ttk.LabelFrame(self.root, text=" 指令序列 ", padding=15)
+        frame_btns.pack(fill="both", expand=True, padx=15, pady=10)
+        # 模式按钮配置
+        modes = [
+            ("P1: 自动定高模式", "HEIGHT", "#e8f5e9", "#4CAF50"), # 绿色
+            ("P2: 自动降落程序", "LANDING", "#e3f2fd", "#2196F3"),# 蓝色
+            ("P0: 手动/切断控制", "CUT", "#ffebee", "#F44336"),    # 红色
+        ]
+        for text, mode_val, bg, active_fg in modes:
+            btn = tk.Radiobutton(frame_btns, text=text, 
+                                variable=self.current_mode, value=mode_val,
+                                indicatoron=0, # 变成按钮外观
+                                selectcolor=active_fg, # 选中时的颜色
+                                font=("Microsoft YaHei", 10, "bold"),
+                                padx=20, pady=12,
+                                cursor="hand2")
+            btn.pack(pady=8, fill="x")
+        self.status_label = ttk.Label(self.root, text="系统已就绪 | 多飞行器同步运行", foreground="gray")
+        self.status_label.pack(side="bottom", pady=15)
+    
+    def single_rocket_thread(self, r):
+        """
+        单个火箭的独立控制逻辑。
+        即使 r 船炸了，报错也只会被这个线程捕获并退出，不影响主程序和其他船。
+        """
+        print(f"[系统] 线程启动：开始监控飞行器 -> {r.name}")
+        
+        while self.running:
+            mode = self.current_mode.get()
+            try:
+                # 尝试获取最新高度
+                try:
+                    h = float(self.target_height_var.get())
+                except:
+                    h = 100.0
+                # 根据模式执行对应的控制逻辑
+                if mode == "HEIGHT":
+                    r.rocket_height_maintainence(target_height=h, dt=self.dt)
+                elif mode == "LANDING":
+                    r.fast_landing_controll(dt=self.dt)
+                elif mode == "CUT":
+                    r.empty_control(dt=self.dt)
+                
+                # 严格控制采样频率
+                time.sleep(self.dt)
+            except Exception as e:
+                # ！！！这里是保证不卡住的关键 ！！！
+                print(f"\n[警告] 飞行器 {r.name} 通信中断！")
+                print(f"原因：{e} (可能已焚毁或由于分级导致 Vessel 对象失效)")
+                print(f"[系统] 已安全终止该船的控制线程。\n")
+                break # 退出循环，该线程结束，其他线程继续运行
+
+
 if __name__ == '__main__':
     dt = 0.05
-    print("开始运行")
+    print("正在建立 KRPC 通信...")
+    
+    # 自动识别列表中的船只
+    vessels = space_center.vessels
+    name_list = ['testship2', 'testship3', 'testship4'] 
+    ctrl_list = []
+    
+    for v in vessels:
+        if v.name in name_list:
+            ctrl_list.append(rocket_control(v))
+    
+    # 如果没找到列表中的，默认控制当前飞船
+    if not ctrl_list:
+        print("未检测到预设船只，切换至当前活动飞行器")
+        ctrl_list.append(rocket_control(conn.space_center.active_vessel))
+    # 启动 GUI 主循环
+    root = tk.Tk()
+    app = RocketControlGUI(root, ctrl_list)
+    root.mainloop()
 
     # # 单飞行器
     # vessel = conn.space_center.active_vessel
@@ -384,23 +512,23 @@ if __name__ == '__main__':
     #     Rocket.fast_landing_controll(dt=dt)
     #     time.sleep(dt)
     
-    # 多飞行器
-    vessels = space_center.vessels
-    name_list = ['testship2', 'testship3', 'testship4']
-    Rocket_list = []
-    # 循环加载所有飞行器
-    for vessel in vessels:
-        if vessel.name in name_list:
-            Rocket = rocket_control(vessel)
-            Rocket_list.append(Rocket)
+    # # 多飞行器
+    # vessels = space_center.vessels
+    # name_list = ['testship2', 'testship3', 'testship4']
+    # Rocket_list = []
+    # # 循环加载所有飞行器
+    # for vessel in vessels:
+    #     if vessel.name in name_list:
+    #         Rocket = rocket_control(vessel)
+    #         Rocket_list.append(Rocket)
 
-    # # 遍历控制
-    for i in range(int(40/dt)):
-        t = float(i)*dt
-        if t < 10:
-            for i, Rocket in enumerate(Rocket_list):
-                Rocket.rocket_height_maintainence(target_height=100, dt=dt)
-        else:
-            for i, Rocket in enumerate(Rocket_list):
-                Rocket.fast_landing_controll(dt=dt)
-        time.sleep(dt)
+    # # # 遍历控制
+    # for i in range(int(40/dt)):
+    #     t = float(i)*dt
+    #     if t < 10:
+    #         for i, Rocket in enumerate(Rocket_list):
+    #             Rocket.rocket_height_maintainence(target_height=100, dt=dt)
+    #     else:
+    #         for i, Rocket in enumerate(Rocket_list):
+    #             Rocket.fast_landing_controll(dt=dt)
+    #     time.sleep(dt)
