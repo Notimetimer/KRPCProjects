@@ -488,7 +488,7 @@ if __name__ == '__main__':
     
     # 自动识别列表中的船只
     vessels = space_center.vessels
-    name_list = ['testship2', 'testship3', 'testship4'] 
+    name_list = ['testship', 'testship1'] 
     ctrl_list = []
     
     for v in vessels:
