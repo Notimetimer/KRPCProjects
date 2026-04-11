@@ -373,9 +373,28 @@ class rocket_control(object):
 
         # 自动定高 PID 输出油门
         throttle_cmd = self.height_controller.calculate(target_height - self.surface_altitude, dt=dt)
+
         # 头朝下的时候强制收油门
         if self.direction_head[1]<0:
-            throttle_cmd=0
+            throttle_cmd=0.01 # 不能全收，留一点用来转向
+
+        # 预计爬升会飞过的时候关小火只保留姿态控制功能
+        if self.vertical_speed > 0 and target_height > self.surface_altitude: 
+            max_h_predict = self.surface_altitude + (self.vertical_speed)**2 / (2*self.g)
+            if max_h_predict - target_height > 5:
+                throttle_cmd=0.01 # 预计会飞过的时候关小火只保留姿态控制
+        # 预计下降会飞过的时候满油门减速
+        if self.vertical_speed < 0 and\
+            target_height < self.surface_altitude and\
+                self.pitch_angle > 0:
+            # 启动最大推力高度
+            h_max_thrust = target_height + (self.vertical_speed**2)/ \
+                (2*self.g*(self.max_twr * sin(self.pitch_rad) - 1)) * 1.2 # 安全高度倍率
+            if self.surface_altitude > h_max_thrust + 5:
+                throttle_cmd=max(0.01, throttle_cmd) # 至少要保留姿态控制
+            elif self.surface_altitude - target_height > 5:
+                throttle_cmd=1.0
+
         if keyboard.is_pressed('z'):
             control.throttle = 1.0
             control.yaw = 0.0
