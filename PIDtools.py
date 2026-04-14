@@ -2,6 +2,20 @@ import numpy as np
 from numpy.linalg import norm
 from math import *
 
+# 一阶惯性环节
+class FirstOrderIneritialElement(object):
+    def __init__(self, rate=np.inf) -> None:
+        self.rate = rate
+        self.last_state = None
+    def calculate(self, input, dt=0.02):
+        if self.last_state is None:
+            output = input
+        else:
+            state_change_req = input - self.last_state
+            output = self.last_state + np.sign(state_change_req) * min(self.rate * dt, abs(state_change_req))
+        self.last_state = output
+        return output
+
 class DeltaPID(object):
     """增量式PID算法实现"""
     def __init__(self, p=0, i=0, d=0) -> None:

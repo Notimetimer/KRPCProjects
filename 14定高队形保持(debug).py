@@ -7,7 +7,7 @@ import numpy as np
 import math  
 from math import *
 from coord_rotations import *
-from PIDtools import PositionPID, FirstOrderIneritialElement
+from PIDtools import PositionPID
 from numpy.linalg import norm
 import keyboard
 import copy
@@ -60,19 +60,18 @@ class rocket_control(object):
 
         # 水平减速参数
         # 下降姿态环
-        self.pointing_pid = PositionPID(max=0.4, min=0, p=0.12, i=0, d=0.09) # max=0.3, min=0, p=0.1, i=0, d=0.07
+        self.pointing_pid = PositionPID(max=0.4, min=0, p=0.12, i=0, d=0.24) # max=0.4, min=0, p=0.12, i=0, d=0.09
         # 减摇姿态环
         self.stable_pointing_pid = PositionPID(max=0.3, min=0, p=0.1, i=0, d=0.07)
         # 快速姿态环
         self.fast_pointing_pid = PositionPID(max=1.0, min=0, p=1.0, i=0, d=0.7)
 
-        # 水平一阶惯性环节
-        self.hor_speed_inertial = FirstOrderIneritialElement(rate=5)
-
         # 水平加速度环
-        self.hor_acc_pid = PositionPID(max=2.0, min=0, p=2.0, i=0.0, d=2.0) # p=0.2, i=0.001, d=0.14
+        self.hor_acc_pid = PositionPID(max=2.0, min=0, p=2.0, i=0.001, d=2.0) # p=0.2, i=0.001, d=0.14
         # 水平速度环
-        self.hor_speed_pid = PositionPID(max=5.0, min=0, p=5.0, i=0*0.001, d=5.0) # p=0.2, i=0.001, d=0.14
+        self.hor_speed_pid = PositionPID(max=5.0, min=0, p=5.0, i=0.001, d=5.0) # p=0.2, i=0.001, d=0.14
+        # 编队水平相对距离环
+        self.hor_rel_pos_pid = PositionPID(max=1.0, min=0, p=0.5, i=0, d=1.0)
 
         p_turn = 2.0
         i_turn = 0.0
@@ -88,6 +87,10 @@ class rocket_control(object):
             'right': (1, 0, 0),    # 右侧  
             'down': (0, 0, 1)      # 下方  
         } 
+        
+        # 编队保持目标位移（相对于虚拟中心）
+        self.formation_offset_N = 0.0
+        self.formation_offset_E = 0.0
 
     def get_state_of_NUE(self,):
         vessel = self.vessel
@@ -151,10 +154,23 @@ class rocket_control(object):
         # 重量
         self.mass = self.vessel.mass
         self.g = self.vessel.orbit.body.surface_gravity
+        # 转动惯量
+        # 获取载具的转动惯量 (pitch, roll, yaw)  
+        self.moment_of_inertia = self.vessel.moment_of_inertia  # 返回三个轴向的转动惯量，单位为 kg.m²
+        # 获取完整的惯性张量 (3x3矩阵，行主序)  
+        self.inertia_tensor = self.vessel.inertia_tensor  # 返回9个元素的列表
+
         # 当前推重比
         self.current_twr = self.vessel.thrust / (self.mass * self.g)
         # 最大推重比
         self.max_twr = self.vessel.available_thrust / (self.mass * self.g)
+        # 获取发动机的可用力矩  
+        self.engine = self.vessel.parts.engines[0]  
+        self.torque = self.engine.available_torque  # 返回 (pitch, roll, yaw) 的力矩值，单位为 N.m
+        # 载具总可用力矩  
+        self.total_torque = self.vessel.available_torque  # 所有部件的总力矩  
+        self.engine_torque = self.vessel.available_engine_torque  # 仅发动机力矩
+
         # 真空比冲
         self.vacuum_isp = self.vessel.vacuum_specific_impulse
         # 海平面比冲
@@ -177,6 +193,27 @@ class rocket_control(object):
         self.pitch_rad = self.pitch_angle * pi/180
         self.heading_rad = self.heading_angle * pi/180
         self.roll_rad = self.roll_angle * pi/180
+
+    def get_displacement_to_center(self, center_lat, center_lon):
+        """
+        计算飞行器相对于指定中心点的北向和东向位移 (单位: 米)
+        计算公式符合用户要求：不考虑高度，基于经纬度的水平位移
+        """
+        # 获取两个点的世界坐标位置 (Sea Level)
+        pos_center = self.GravSource.surface_position(center_lat, center_lon, self.Globe_frame)
+        pos_vessel = self.GravSource.surface_position(self.latitude, self.longitude, self.Globe_frame)
+
+        # 转换到表面参考帧 (x=East, y=North, z=Up)
+        pos_center_surface = conn.space_center.transform_position(pos_center, self.Globe_frame, self.surface_frame)
+        pos_vessel_surface = conn.space_center.transform_position(pos_vessel, self.Globe_frame, self.surface_frame)
+        
+        # 计算位移 (Vessel - Center)
+        # 北向位移 (index 1)
+        disp_N = pos_vessel_surface[1] - pos_center_surface[1]
+        # 东向位移 (index 0)
+        disp_E = pos_vessel_surface[0] - pos_center_surface[0]
+        
+        return disp_N, disp_E
     
     def shut_down(self, dt=0.05):
         self.control.throttle = 0
@@ -206,7 +243,13 @@ class rocket_control(object):
         # 只考虑垂直速度
         # h_max_thrust = (self.vertical_speed**2)/(2*self.g*(self.max_twr * sin(self.pitch_rad) - 1)) * 1.2 # 安全高度倍率
         # 用总速度估算
-        h_max_thrust = (self.speed_surf**2)/(2*self.g*(self.max_twr * sin(self.pitch_rad) - 1)) * 1.3 # 安全高度倍率
+        h_max_thrust = (self.speed_surf**2)/(2*self.g*(self.max_twr * sin(self.pitch_rad) - 1)) * 1.2 # 安全高度倍率
+
+        # print("垂直速度", self.vertical_speed)
+        # print("对地速度", self.speed_surf)
+        # print("当前高度", self.surface_altitude)
+        # print("最大推力高度", h_max_thrust)
+        # print()
 
         # 高于最大推力高度时， 优先控制姿态
         if self.surface_altitude > max(h_max_thrust, 50):
@@ -214,12 +257,10 @@ class rocket_control(object):
             target_point_ = target_point0_
             control.throttle = 0.01 # 用微小的油门控制姿态
             target_descend_speed = self.vertical_speed  # 保持当前下降速度
-            # target_speed = self.speed_surf  # 保持当前下降速度
 
             # 防止气动过载
             if self.speed_surf > 300 and self.surface_altitude < 6000:
                 target_descend_speed = -300
-                # target_speed = 300
         else:
 
             # 目标指向考虑减速
@@ -237,18 +278,14 @@ class rocket_control(object):
             # 速度过快，满推力减速
             if abs(self.vertical_speed) > 10:
                 target_descend_speed = 100 # 制造饱和
-                # target_speed = 100 # 制造饱和
             # 速度可接受，按高度指定下降速度
             elif self.surface_altitude > 12:
                 target_descend_speed = -5 # np.clip(self.surface_altitude/100, 0, 1)*-10
-                # target_speed = 5
             else:
                 target_descend_speed = -2 # np.clip(self.surface_altitude/100, 0, 1)*-2
-                # target_speed = 2
 
             # 垂直速度误差
             speed_error = self.vertical_speed-target_descend_speed
-            # speed_error = self.speed_surf-target_speed
             control.throttle = np.clip(speed_error / -2, 0,1)
 
         # 姿态稳定
@@ -278,68 +315,6 @@ class rocket_control(object):
         control.pitch = self.pitch_pid.calculate(pitch_cmd, dt=dt, d_error=-self.q)
         control.yaw = self.yaw_pid.calculate(-yaw_cmd, dt=dt, d_error=-self.r)
 
-    # 自动缓降
-    def slow_descend_controll(self, dt=0.05):
-        # 读取观测数据
-        self.get_state_of_NUE()
-        # 接入控制
-        control = self.vessel.control
-        target_point_0 = np.array([0, 1, 0], dtype='float64')
-        # 切断控制
-        if self.surface_altitude < 3 and abs(self.vertical_speed)<1:
-            control.throttle = 0
-            control.pitch = 0
-            control.yaw = 0
-            control.roll = 0
-            return
-        
-        # 期望下降速度
-        if self.surface_altitude > 150:
-            target_descend_speed = max(np.clip(self.surface_altitude/100, 0, 1)*-50, -300)
-        elif self.surface_altitude > 20:
-            target_descend_speed = np.clip(self.surface_altitude/100, 0, 1)*-10
-        else:
-            target_descend_speed = np.clip(self.surface_altitude/100, 0, 1)*-3
-
-        # 垂直速度误差
-        speed_error = self.vertical_speed-target_descend_speed
-        
-        if speed_error > 0:
-            control.throttle = 0.0
-        else:
-            control.throttle = np.clip(speed_error / -10, 0,1)
-
-        # 姿态稳定
-        # 半手动滚转控制
-        if keyboard.is_pressed('e'):
-            control.roll = 1
-        elif keyboard.is_pressed('q'):
-            control.roll = -1
-        else:
-            control.roll = self.roll_pid.calculate(-self.p *180/pi, dt=dt)
-        # 目标指向考虑减速
-        v_hor = float((self.velocity_surf[0]**2 + self.velocity_surf[2]**2)**0.5) # 水平分速度大小
-
-        target_point_ = target_point_0 - self.pointing_pid.calculate(v_hor, dt=dt) \
-                * np.array([self.velocity_surf[0], 0.0, self.velocity_surf[2]])/(v_hor+1e-5)
-        # 归一化
-        target_point_ = target_point_/(np.linalg.norm(target_point_)+1e-5)
-        
-        # # 变换，防止bx与期望之间角度为钝角
-        temp = copy.deepcopy(self.bx)*0.9 + copy.deepcopy(target_point_) # 拷贝数值
-        target_point_1 = temp/(norm(temp)+1e-5) # 重新引用
-
-        # 1
-        tmp = np.cross(self.bx, target_point_1)
-        # print("target_point_", target_point_1)
-
-        # 瞎写的，效果竟然挺好
-        yaw_cmd = float(np.dot(tmp, self.by)*0.99999) *2
-        pitch_cmd = float(np.dot(tmp, self.bz)*0.99999) *2
-
-        control.pitch = self.pitch_pid.calculate(pitch_cmd, dt=dt, d_error=-self.q)
-        control.yaw = self.yaw_pid.calculate(-yaw_cmd, dt=dt, d_error=-self.r)
-
     # 定高
     def rocket_height_maintainence(self, 
                                 target_height=100,
@@ -347,9 +322,34 @@ class rocket_control(object):
                                 target_E_speed = 0.0,
                                 dt=0.05,
                                 type="simple",
+                                # 新增中心点参数
+                                current_avg_lat = None,
+                                current_avg_lon = None,
                                 ):
         # 读取观测数据
         self.get_state_of_NUE()
+
+        # --- 编队保持逻辑 ---
+        if current_avg_lat is not None and current_avg_lon is not None:
+            # 计算当前相对于最新中心的位移
+            curr_dn, curr_de = self.get_displacement_to_center(current_avg_lat, current_avg_lon)
+            
+            # 误差 = 目标位移 - 当前位移
+            err_n = self.formation_offset_N - curr_dn
+            err_e = self.formation_offset_E - curr_de
+            err_hor = (err_n**2 + err_e**2)**0.5
+            
+            # 计算速度补偿：位移误差 50m 时饱和为 20m/s (系数 0.4)
+            err_hor_normal = 50 * self.hor_rel_pos_pid.calculate(err_hor/50, dt=dt)
+
+            v_n_comp = np.clip(0.4 * err_n / (err_hor+1e-5) * err_hor_normal, -20.0, 20.0)
+            v_e_comp = np.clip(0.4 * err_e / (err_hor+1e-5) * err_hor_normal, -20.0, 20.0)
+            
+            # 在期望速度基础上叠加补偿量
+            target_N_speed += v_n_comp
+            target_E_speed += v_e_comp
+        # --------------------
+
         # 接入控制
         control = self.vessel.control
         # 半手动滚转控制
@@ -385,12 +385,6 @@ class rocket_control(object):
                     min(min_tan_theta_allowed, self.fast_pointing_pid.calculate(v_hor_error, dt=dt)) \
                     * np.array([v_N_error, 0.0, v_E_error])/(v_hor_error+1e-5)
         else:
-            # 加速度环失败的等效
-            # temp =  self.hor_speed_pid.calculate(v_hor_error, dt=dt)
-            # temp = self.hor_speed_inertial.calculate(temp, dt=dt) # 一阶惯性环节
-            # target_point_ = target_point0_ - temp \
-            #         * np.array([v_N_error, 0.0, v_E_error])/(v_hor_error+1e-5)
-
             "带加速度环期望姿态"
             # 计算当前水平加速度分量（使用推力投影，未考虑空气阻力）
             a_N = self.current_twr * self.g * self.bx[0]
@@ -497,6 +491,10 @@ class RocketControlGUI:
         self.target_E_speed_var = tk.StringVar(value="0.0")
         self.dt = 0.05
         
+        # 编队数据状态
+        self.avg_lat = 0.0
+        self.avg_lon = 0.0
+        
         # --- 修复点：必须先定义 running，后面的线程才能跑起来 ---
         self.running = True 
         # ----------------------------------------------------
@@ -512,6 +510,9 @@ class RocketControlGUI:
             )
             t.start()
             self.control_threads.append(t)
+        
+        # 启动全局计算逻辑线程 (计算虚拟中心及记录位移)
+        threading.Thread(target=self.global_formation_thread, daemon=True).start()
 
     def adjust_value(self, var, increment):
         """通用增量调节函数"""
@@ -586,6 +587,44 @@ class RocketControlGUI:
             btn.pack(pady=8, fill="x")
         self.status_label = ttk.Label(self.root, text="系统已就绪 | 多飞行器同步运行", foreground="gray")
         self.status_label.pack(side="bottom", pady=15)
+
+    def global_formation_thread(self):
+        """后台线程：实时计算所有活着的飞行器的虚拟几何中心"""
+        while self.running:
+            try:
+                lats = []
+                lons = []
+                active_ctrls = []
+                
+                # 遍历识别活着的船
+                for r in self.rocket_list:
+                    try:
+                        # 检查船只是否仍有效 (KRPC 抛错则认为已炸)
+                        lat = r.vessel.flight(r.surface_frame).latitude
+                        lon = r.vessel.flight(r.surface_frame).longitude
+                        lats.append(lat)
+                        lons.append(lon)
+                        active_ctrls.append(r)
+                    except:
+                        continue
+                
+                if lats:
+                    # 计算虚拟几何中心 (不考虑高度的平均经纬度)
+                    self.avg_lat = sum(lats) / len(lats)
+                    self.avg_lon = sum(lons) / len(lons)
+                    
+                    # 关键逻辑：处于 CUT 模式时，实时记录并更新每个船的相对位移作为目标
+                    if self.current_mode.get() == "CUT":
+                        for r in active_ctrls:
+                            # 提前更新一次状态以获得最新的 latitude/longitude
+                            r.get_state_of_NUE()
+                            dn, de = r.get_displacement_to_center(self.avg_lat, self.avg_lon)
+                            r.formation_offset_N = dn
+                            r.formation_offset_E = de
+            except Exception as e:
+                pass 
+            
+            time.sleep(0.1) # 10Hz 更新中心点足够
     
     def single_rocket_thread(self, r):
         """
@@ -610,7 +649,15 @@ class RocketControlGUI:
                 
                 # 根据模式执行对应的控制逻辑
                 if mode == "HEIGHT":
-                    r.rocket_height_maintainence(target_height=h, target_N_speed=vn, target_E_speed=ve, dt=self.dt, type='not simple')
+                    # 传入当前中心点经纬度以启用队形保持
+                    r.rocket_height_maintainence(
+                        target_height=h, 
+                        target_N_speed=vn, 
+                        target_E_speed=ve, 
+                        dt=self.dt,
+                        current_avg_lat=self.avg_lat,
+                        current_avg_lon=self.avg_lon
+                    )
                 elif mode == "LANDING":
                     r.fast_landing_controll(dt=self.dt)
                 elif mode == "CUT":
@@ -636,7 +683,7 @@ if __name__ == '__main__':
     
     # 自动识别列表中的船只
     vessels = space_center.vessels
-    name_list = ['testship1'] # , 'testship2']
+    name_list = ['testship1', 'testship2']
     # ['testship1', 'testship2', 'testship3'] 
     ctrl_list = []
     
