@@ -234,6 +234,8 @@ class rocket_control(object):
             target_point_ = target_point0_/(np.linalg.norm(target_point0_)+1e-5) - self.pointing_pid.calculate(v_hor, dt=dt) \
                     * np.array([self.velocity_surf[0], 0.0, self.velocity_surf[2]])/(v_hor+1e-5)
             
+            target_point_[1] = max(1e-3, target_point_[1]) # 不准头朝下
+            
             # 速度过快，满推力减速
             if abs(self.vertical_speed) > 10:
                 target_descend_speed = 100 # 制造饱和
