@@ -649,10 +649,15 @@ if __name__ == '__main__':
     dt = 0.05
     print("正在建立 KRPC 通信...")
     
-    # 自动识别列表中的船只
+    vessel = conn.space_center.active_vessel
+    Rocket = rocket_control(vessel)
+    name_list = [vessel.name]
+
+    # # 自动识别列表中的船只
     vessels = space_center.vessels
-    name_list = ['testship1'] # , 'testship2']
-    # ['testship1', 'testship2', 'testship3'] 
+    # name_list = ['testship1'] # , 'testship2']
+    # # ['testship1', 'testship2', 'testship3']
+
     ctrl_list = []
     
     for v in vessels:
