@@ -151,10 +151,23 @@ class rocket_control(object):
         # 重量
         self.mass = self.vessel.mass
         self.g = self.vessel.orbit.body.surface_gravity
+        # 转动惯量
+        # 获取载具的转动惯量 (pitch, roll, yaw)  
+        self.moment_of_inertia = self.vessel.moment_of_inertia  # 返回三个轴向的转动惯量，单位为 kg.m²
+        # 获取完整的惯性张量 (3x3矩阵，行主序)  
+        self.inertia_tensor = self.vessel.inertia_tensor  # 返回9个元素的列表
+
         # 当前推重比
         self.current_twr = self.vessel.thrust / (self.mass * self.g)
         # 最大推重比
         self.max_twr = self.vessel.available_thrust / (self.mass * self.g)
+        # 获取发动机的可用力矩  
+        self.engine = self.vessel.parts.engines[0]  
+        self.torque = self.engine.available_torque  # 返回 (pitch, roll, yaw) 的力矩值，单位为 N.m
+        # 载具总可用力矩  
+        self.total_torque = self.vessel.available_torque  # 所有部件的总力矩  
+        self.engine_torque = self.vessel.available_engine_torque  # 仅发动机力矩
+
         # 真空比冲
         self.vacuum_isp = self.vessel.vacuum_specific_impulse
         # 海平面比冲
