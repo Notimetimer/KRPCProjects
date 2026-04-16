@@ -1,0 +1,58 @@
+import krpc  
+import time  
+  
+conn = krpc.connect()  
+vessel = conn.space_center.active_vessel  
+engines = vessel.parts.engines  
+
+print("逐个控制引擎推力:")  
+for i, engine in enumerate(engines):  
+    print(f"\n引擎 {i}: {engine.part.title}")  
+      
+    # 保存当前状态  
+    original_throttle = engine.throttle  
+    original_thrust_limit = engine.thrust_limit  
+    original_independent = engine.independent_throttle  
+      
+    # 启用独立油门控制  
+    engine.independent_throttle = True  
+      
+    # 推力调到最大  
+    print("  推力调到最大...才怪")  
+    engine.thrust_limit = 1.0   *0.1
+    engine.throttle = 1.0   *0.1
+    time.sleep(2)  
+      
+    # 推力调到0  
+    print("  推力调到0...")  
+    engine.throttle = 0.0  
+    time.sleep(1)  
+      
+    # 恢复原始状态  
+    print("  恢复原始状态...")  
+    engine.throttle = original_throttle  
+    engine.thrust_limit = original_thrust_limit  
+    engine.independent_throttle = original_independent
+
+# import krpc  
+# import time  
+  
+# conn = krpc.connect()  
+# vessel = conn.space_center.active_vessel  
+  
+# # 获取所有引擎  
+# engines = vessel.parts.engines  
+  
+# print("飞行器引擎列表:")  
+# for i, engine in enumerate(engines):  
+#     print(f"  {i}: {engine.part.title} (阶段 {engine.part.stage})")  
+  
+# # 逐个点火和关闭  
+# for i, engine in enumerate(engines):  
+#     print(f"\n点火引擎 {i}: {engine.part.title}")  
+#     engine.active = True  
+#     time.sleep(1)  
+      
+#     print(f"关闭引擎 {i}: {engine.part.title}")  
+#     engine.active = False  
+#     time.sleep(0)
