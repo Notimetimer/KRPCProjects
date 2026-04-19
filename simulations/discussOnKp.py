@@ -33,7 +33,7 @@ for turns in range(iterations):
             author: MrGEFORCE
             [English]Remember to plus dt when updates the mass. I forgot this in the old version, and only
             the code for the descent model was correct.
-            The defined alpha is the fuel consumed in 1 second, of course it needs to be multiplied by dt.
+            The defined alpha is the fuel consumed in 1 second, of course it needs to be multiplied by_surf dt.
             The discussion of ki and kd, as well as the simulation of white noise, have also been changed,
             only here gives the comments to explain these changes.
             [Chinese]质量的更新记得带上dt，之前忘了，原本只有下降模型的代码是正确的。

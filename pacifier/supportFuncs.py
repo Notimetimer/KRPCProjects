@@ -53,14 +53,14 @@ def form_vec_description(vec: np.ndarray) -> str:
 
 def compute_up_vector(pitch, heading):  # chatGPT
     # Convert angles from degrees to radians
-    pitch_rad = np.radians(pitch)
+    pitch_angle_rad = np.radians(pitch)
     heading_rad = np.radians(heading)
 
     # Pitch rotation matrix (around the x-axis)
     R_pitch = np.array([
         [1, 0, 0],
-        [0, np.cos(pitch_rad), -np.sin(pitch_rad)],
-        [0, np.sin(pitch_rad), np.cos(pitch_rad)]
+        [0, np.cos(pitch_angle_rad), -np.sin(pitch_angle_rad)],
+        [0, np.sin(pitch_angle_rad), np.cos(pitch_angle_rad)]
     ])
 
     # Heading rotation matrix (around the z-axis)

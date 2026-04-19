@@ -165,9 +165,9 @@ for i in range(int(60*5/dt)):
     body_axes_custom['y'] = - UNE2NUE(surface_axes['down'])
     body_axes_custom['z'] = UNE2NUE(surface_axes['right'])
     # 姿态控制：基于 body_axes_custom 与 target_point_
-    bx = np.array(body_axes_custom['x'])
-    by = np.array(body_axes_custom['y'])
-    bz = np.array(body_axes_custom['z'])
+    bx_surf = np.array(body_axes_custom['x'])
+    by_surf = np.array(body_axes_custom['y'])
+    bz_surf = np.array(body_axes_custom['z'])
 
     # print("飞行器体轴在表面参考系中的表示：")  
     # for axis_name, vector in body_axes_custom.items():  
@@ -204,17 +204,17 @@ for i in range(int(60*5/dt)):
     # 归一化
     target_point_ = target_point_/(np.linalg.norm(target_point_)+1e-5)
     
-    # # 变换，防止bx与期望之间角度为钝角
-    temp = copy.deepcopy(bx)*0.9 + copy.deepcopy(target_point_) # 拷贝数值
+    # # 变换，防止bx_surf与期望之间角度为钝角
+    temp = copy.deepcopy(bx_surf)*0.9 + copy.deepcopy(target_point_) # 拷贝数值
     target_point1_ = temp/(norm(temp)+1e-5) # 重新引用
 
     # 1
-    tmp = np.cross(bx, target_point1_)
+    tmp = np.cross(bx_surf, target_point1_)
     # print("target_point_", target_point1_)
 
     # 瞎写的，效果竟然挺好
-    yaw_cmd = float(np.dot(tmp, by)*0.99999) *2
-    pitch_cmd = float(np.dot(tmp, bz)*0.99999) *2
+    yaw_cmd = float(np.dot(tmp, by_surf)*0.99999) *2
+    pitch_cmd = float(np.dot(tmp, bz_surf)*0.99999) *2
 
 
     # # 按键映射覆盖：w/s 控制 pitch，a/d 控制 yaw，e/q 控制 roll，z/x 控制油门
@@ -264,16 +264,16 @@ for i in range(int(60*5/dt)):
     # # 使用带符号角（signed angle）在两个轴上计算最短旋转角, 几何上计算的角度正确，但控制效果不稳定
     # L_ = target_point_
     # # 俯仰误差角
-    # L_xy_b_ = L_ - np.dot(L_, bz) * bz / (norm(bz)+1e-8)
-    # x_b_2L_xy_b_ = np.cross(bx, L_xy_b_) / (norm(L_xy_b_)+1e-8) # 省略一个norm
-    # x_b_2L_xy_b_sin = np.dot(x_b_2L_xy_b_, bz)
-    # x_b_2L_xy_b_cos = np.dot(bx, L_xy_b_) / (norm(L_xy_b_)+1e-8) # 省略一个norm
+    # L_xy_b_ = L_ - np.dot(L_, bz_surf) * bz_surf / (norm(bz_surf)+1e-8)
+    # x_b_2L_xy_b_ = np.cross(bx_surf, L_xy_b_) / (norm(L_xy_b_)+1e-8) # 省略一个norm
+    # x_b_2L_xy_b_sin = np.dot(x_b_2L_xy_b_, bz_surf)
+    # x_b_2L_xy_b_cos = np.dot(bx_surf, L_xy_b_) / (norm(L_xy_b_)+1e-8) # 省略一个norm
     # delta_z_angle = np.arctan2(x_b_2L_xy_b_sin, x_b_2L_xy_b_cos)
     # # 偏航误差角
-    # L_xz_b_ = L_ - np.dot(L_, by) * by / (norm(by)+1e-8)
-    # x_b_2L_xz_b_ = np.cross(bx, L_xz_b_) / (norm(L_xz_b_)+1e-8) # 省略一个norm
-    # x_b_2L_xz_b_sin = np.dot(x_b_2L_xz_b_, by)
-    # x_b_2L_xz_b_cos = np.dot(bx, L_xz_b_) / (norm(L_xz_b_)+1e-8)
+    # L_xz_b_ = L_ - np.dot(L_, by_surf) * by_surf / (norm(by_surf)+1e-8)
+    # x_b_2L_xz_b_ = np.cross(bx_surf, L_xz_b_) / (norm(L_xz_b_)+1e-8) # 省略一个norm
+    # x_b_2L_xz_b_sin = np.dot(x_b_2L_xz_b_, by_surf)
+    # x_b_2L_xz_b_cos = np.dot(bx_surf, L_xz_b_) / (norm(L_xz_b_)+1e-8)
     # delta_y_angle = np.arctan2(x_b_2L_xz_b_sin, x_b_2L_xz_b_cos)
     # # 滚转方向上暂时没有目标滚转方向，待续
     # pitch_cmd = delta_z_angle

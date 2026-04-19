@@ -173,9 +173,9 @@ for i in range(int(60*5/dt)):
     body_axes_custom['y'] = - UNE2NUE(surface_axes['down'])
     body_axes_custom['z'] = UNE2NUE(surface_axes['right'])
     # 姿态控制：基于 body_axes_custom 与 target_point_
-    bx = np.array(body_axes_custom['x'])
-    by = np.array(body_axes_custom['y'])
-    bz = np.array(body_axes_custom['z'])
+    bx_surf = np.array(body_axes_custom['x'])
+    by_surf = np.array(body_axes_custom['y'])
+    bz_surf = np.array(body_axes_custom['z'])
 
     # print("飞行器体轴在表面参考系中的表示：")  
     # for axis_name, vector in body_axes_custom.items():  
@@ -212,17 +212,17 @@ for i in range(int(60*5/dt)):
     # 归一化
     target_point_ = target_point_/(np.linalg.norm(target_point_)+1e-5)
     
-    # # 变换，防止bx与期望之间角度为钝角
-    temp = copy.deepcopy(bx)*0.9 + copy.deepcopy(target_point_) # 拷贝数值
+    # # 变换，防止bx_surf与期望之间角度为钝角
+    temp = copy.deepcopy(bx_surf)*0.9 + copy.deepcopy(target_point_) # 拷贝数值
     target_point1_ = temp/(norm(temp)+1e-5) # 重新引用
 
     # 1
-    tmp = np.cross(bx, target_point1_)
+    tmp = np.cross(bx_surf, target_point1_)
     # print("target_point_", target_point1_)
 
     # 瞎写的，效果竟然挺好
-    yaw_cmd = float(np.dot(tmp, by)*0.99999) *2
-    pitch_cmd = float(np.dot(tmp, bz)*0.99999) *2
+    yaw_cmd = float(np.dot(tmp, by_surf)*0.99999) *2
+    pitch_cmd = float(np.dot(tmp, bz_surf)*0.99999) *2
 
 
     # # 按键映射覆盖：w/s 控制 pitch，a/d 控制 yaw，e/q 控制 roll，z/x 控制油门

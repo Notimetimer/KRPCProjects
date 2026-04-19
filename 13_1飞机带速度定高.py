@@ -108,9 +108,10 @@ class rocket_control(object):
         body_axes_custom['y'] = - UNE2NUE(surface_axes['down'])
         body_axes_custom['z'] = UNE2NUE(surface_axes['right'])
         # 姿态控制：基于 body_axes_custom 与 target_point_
-        self.bx = np.array(body_axes_custom['x'])
-        self.by = np.array(body_axes_custom['y'])
-        self.bz = np.array(body_axes_custom['z'])
+        # 前上右相对地面
+        self.bx_surf = np.array(body_axes_custom['x'])
+        self.by_surf = np.array(body_axes_custom['y'])
+        self.bz_surf = np.array(body_axes_custom['z'])
 
         # 速度矢量(地面系)
         surface_vel = self.vessel.flight(self.Globe_frame).velocity
@@ -184,7 +185,7 @@ class rocket_control(object):
         self.angle_of_attack_angle = self.flight_surface.angle_of_attack
         self.sideslip_angle_angle = self.flight_surface.sideslip_angle
         # 弧度制
-        self.pitch_rad = self.pitch_angle * pi/180
+        self.pitch_angle_rad = self.pitch_angle * pi/180
         self.heading_rad = self.heading_angle * pi/180
         self.roll_rad = self.roll_angle * pi/180
     
@@ -212,11 +213,10 @@ class rocket_control(object):
             control.roll = 0
             return
         
-        # 启动最大推力高度
         # 只考虑垂直速度
-        # h_max_thrust = (self.vertical_speed**2)/(2*self.g*(self.max_twr * cos(self.pitch_rad) - 1)+1e-5) * 1.2 # 安全高度倍率
+        # h_max_thrust = (self.vertical_speed**2)/(2*self.g*(self.max_twr * (self.by_surf[1]/(norm(self.by_surf)+1e-3)) - 1)+1e-5) * 1.2 # 安全高度倍率
         # 用总速度估算
-        h_max_thrust = (self.speed_surf**2)/(2*self.g*(self.max_twr * cos(self.pitch_rad) - 1)+1e-5) * 1.3 # 安全高度倍率
+        h_max_thrust = (self.speed_surf**2)/(2*self.g*(self.max_twr * (self.by_surf[1]/(norm(self.by_surf)+1e-3)) - 1)+1e-5) * 1.3 # 安全高度倍率
 
         # 高于最大推力高度时， 优先控制姿态
         if self.surface_altitude > max(h_max_thrust, 50):
@@ -281,19 +281,19 @@ class rocket_control(object):
         target_point_ = (target_point_/(np.linalg.norm(target_point_)+1e-5)).copy()
         
         # # 变换，防止上方与期望之间角度为钝角
-        temp = copy.deepcopy(self.by)*0.9 + copy.deepcopy(target_point_) # 拷贝数值
+        temp = copy.deepcopy(self.by_surf)*0.9 + copy.deepcopy(target_point_) # 拷贝数值
         target_point1_ = temp/(norm(temp)+1e-5) # 重新引用
 
         # 1
-        tmp = np.cross(self.by, target_point1_)
+        tmp = np.cross(self.by_surf, target_point1_)
         # print("target_point_降落", target_point1_)
 
          # 用sin值做近似
-        # roll_cmd = float(np.dot(tmp, self.bx)*0.99999) *2
-        # pitch_cmd = float(np.dot(tmp, self.bz)*0.99999) *2
+        # roll_cmd = float(np.dot(tmp, self.bx_surf)*0.99999) *2
+        # pitch_cmd = float(np.dot(tmp, self.bz_surf)*0.99999) *2
         # # 直接用角度
-        roll_cmd = np.arcsin(float(np.dot(tmp, self.bx)*0.99999)) * 2/pi
-        pitch_cmd = np.arcsin(float(np.dot(tmp, self.bz)*0.99999)) * 2/pi
+        roll_cmd = np.arcsin(float(np.dot(tmp, self.bx_surf)*0.99999)) * 2/pi
+        pitch_cmd = np.arcsin(float(np.dot(tmp, self.bz_surf)*0.99999)) * 2/pi
 
         control.pitch = self.pitch_pid.calculate(pitch_cmd, dt=dt, d_error=-self.q)
         control.roll = self.roll_pid1.calculate(roll_cmd, dt=dt, d_error=-self.p)
@@ -384,8 +384,8 @@ class rocket_control(object):
 
             "带加速度环期望姿态"
             # 计算当前水平加速度分量（使用推力投影，未考虑空气阻力）
-            a_N = self.current_twr * self.g * self.by[0]
-            a_E = self.current_twr * self.g * self.by[2]
+            a_N = self.current_twr * self.g * self.by_surf[0]
+            a_E = self.current_twr * self.g * self.by_surf[2]
             # 期望加速度
             target_a_hor = - self.hor_speed_pid.calculate(v_hor_error, dt=dt)
             target_N_a = target_a_hor * v_N_error/(v_hor_error+1e-5)
@@ -407,20 +407,20 @@ class rocket_control(object):
         # 归一化
         target_point_ = target_point_/(np.linalg.norm(target_point_)+1e-5)
         
-        # # 变换，防止bx与期望之间角度为钝角
-        temp = copy.deepcopy(self.by)*0.9 + copy.deepcopy(target_point_) # 拷贝数值
+        # # 变换，防止bx_surf与期望之间角度为钝角
+        temp = copy.deepcopy(self.by_surf)*0.9 + copy.deepcopy(target_point_) # 拷贝数值
         target_point1_ = temp/(norm(temp)+1e-5) # 重新引用
 
         # 1
-        tmp = np.cross(self.by, target_point1_)
+        tmp = np.cross(self.by_surf, target_point1_)
         # print("target_point_定高", target_point1_)
 
         # 用sin值做近似
-        # roll_cmd = float(np.dot(tmp, self.bx)*0.99999) *2
-        # pitch_cmd = float(np.dot(tmp, self.bz)*0.99999) *2
+        # roll_cmd = float(np.dot(tmp, self.bx_surf)*0.99999) *2
+        # pitch_cmd = float(np.dot(tmp, self.bz_surf)*0.99999) *2
         # # 直接用角度
-        roll_cmd = np.arcsin(float(np.dot(tmp, self.bx)*0.99999)) * 2/pi
-        pitch_cmd = np.arcsin(float(np.dot(tmp, self.bz)*0.99999)) * 2/pi
+        roll_cmd = np.arcsin(float(np.dot(tmp, self.bx_surf)*0.99999)) * 2/pi
+        pitch_cmd = np.arcsin(float(np.dot(tmp, self.bz_surf)*0.99999)) * 2/pi
 
         control.pitch = self.pitch_pid.calculate(pitch_cmd, dt=dt, d_error=-self.q)
         control.roll = self.roll_pid1.calculate(roll_cmd, dt=dt, d_error=-self.p)
@@ -429,7 +429,7 @@ class rocket_control(object):
         throttle_cmd = self.height_controller.calculate(target_height - self.altitude_sea_level, dt=dt)
 
         # 头朝下的时候强制收油门
-        if self.by[1]<0:
+        if self.by_surf[1]<0:
             throttle_cmd=0.01 # 不能全收，留一点用来转向
 
         # 预计爬升会飞过的时候关小火只保留姿态控制功能
@@ -443,7 +443,7 @@ class rocket_control(object):
                 self.pitch_angle > 0:
             # 启动最大推力高度
             h_max_thrust = target_height + (self.speed_surf**2)/ \
-                (2*self.g*abs(self.max_twr * cos(self.pitch_rad) - 1)+1e-5) * 1.3 # 安全高度倍率
+                (2*self.g*abs(self.max_twr * (self.by_surf[1]/(norm(self.by_surf)+1e-3)) - 1)+1e-5) * 1.3 # 安全高度倍率
             if self.altitude_sea_level > h_max_thrust + 5:
                 throttle_cmd=max(0.01, throttle_cmd) # 至少要保留姿态控制
             elif self.altitude_sea_level - target_height > 5:

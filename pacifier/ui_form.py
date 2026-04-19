@@ -3,7 +3,7 @@
 ################################################################################
 ## Form generated from reading UI file 'form.ui'
 ##
-## Created by: Qt User Interface Compiler version 6.7.1
+## Created by_surf: Qt User Interface Compiler version 6.7.1
 ##
 ## WARNING! All changes made in this file will be lost when recompiling UI file!
 ################################################################################
@@ -85,7 +85,7 @@ class Ui_Widget(object):
 
         self.retranslateUi(Widget)
 
-        QMetaObject.connectSlotsByName(Widget)
+        QMetaObject.connectSlotsby_surfName(Widget)
     # setupUi
 
     def retranslateUi(self, Widget):
