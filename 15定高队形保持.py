@@ -381,8 +381,8 @@ class rocket_control(object):
         else:
             control.roll = self.roll_pid.calculate(-self.p *180/pi, dt=dt)
 
-        # 最小允许俯仰角正切值
-        min_tan_theta_allowed = np.sqrt(self.max_twr**2 - 1)
+        # 最大允许倾斜角正切值
+        max_tan_lean_allowed = np.sqrt(self.max_twr**2 - 1)
 
         # 根据水平速度误差调节倾斜方向和大小
         target_point0_ = np.array([0, 1, 0], dtype='float64')
@@ -403,7 +403,7 @@ class rocket_control(object):
             else:
                 # 需要快速
                 target_point_ = target_point0_ - \
-                    min(min_tan_theta_allowed, self.fast_pointing_pid.calculate(v_hor_error, dt=dt)) \
+                    min(max_tan_lean_allowed, self.fast_pointing_pid.calculate(v_hor_error, dt=dt)) \
                     * np.array([v_N_error, 0.0, v_E_error])/(v_hor_error+1e-5)
         else:
             "带加速度环期望姿态"
@@ -424,7 +424,7 @@ class rocket_control(object):
                 target_point_hor0_/(norm(target_point_hor0_)+1e-5)
             # 加速度环后指向控制
             target_point_ = target_point0_ + target_point_hor_ * \
-                min(min_tan_theta_allowed, self.pointing_pid.calculate(v_hor_error, dt=dt)*norm(target_point_hor_))/ \
+                min(max_tan_lean_allowed, self.pointing_pid.calculate(v_hor_error, dt=dt)*norm(target_point_hor_))/ \
                 (norm(target_point_hor_)+1e-5)
 
         "姿态控制"    

@@ -1,5 +1,4 @@
-# 待续 定高时的速度控制器直接控水平速度很容易震荡，
-# 更换气压高度仍然难以解决，怀疑应该先控加速度再控速度
+# 规范的PID写法使用目标-当前作为误差，这样每个控制项全是+号
 
 import krpc
 import time
@@ -240,9 +239,10 @@ class rocket_control(object):
 
             # 目标指向考虑减速
             v_hor = float((self.velocity_surf[0]**2 + self.velocity_surf[2]**2)**0.5) # 水平分速度大小
-    
+            # 规范化修正：目标速度设为 0，误差 = 0 - v_hor
+            v_hor_error = 0 - v_hor
             target_point0_ = - self.velocity_surf / (self.speed_surf + 1e-5)
-            target_point0_ = target_point0_/(np.linalg.norm(target_point0_)+1e-5) - self.pointing_pid.calculate(v_hor, dt=dt) \
+            target_point0_ = target_point0_/(np.linalg.norm(target_point0_)+1e-5) + self.pointing_pid.calculate(v_hor_error, dt=dt) \
                     * np.array([self.velocity_surf[0], 0.0, self.velocity_surf[2]])/(v_hor+1e-5)
             
             target_point_ = target_point0_.copy()
@@ -268,10 +268,10 @@ class rocket_control(object):
                 target_descend_speed = -2 # np.clip(self.surface_altitude/100, 0, 1)*-2
                 # target_speed = 2
 
-            # 垂直速度误差
-            speed_error = self.vertical_speed-target_descend_speed
-            # speed_error = self.speed_surf-target_speed
-            control.throttle = np.clip(speed_error / -2, 0,1)
+            # 垂直速度误差 (规范化：目标 - 当前)
+            speed_error = target_descend_speed - self.vertical_speed
+            # 这里的 2.0 对应 P 增益的倒数，符号保持正号
+            control.throttle = np.clip(speed_error / 2.0, 0, 1)
 
         # 姿态稳定
         # 半手动滚转控制
@@ -346,22 +346,23 @@ class rocket_control(object):
         v_N = self.velocity_surf[0]
         v_E = self.velocity_surf[2]
 
-        # 速度环误差
-        v_N_error = v_N - target_N_speed
-        v_E_error = v_E - target_E_speed
-        v_hor_error = np.sqrt(v_N_error**2 + v_E_error**2)
+        # 速度环误差 (规范化：目标 - 当前)
+        v_N_error = target_N_speed - v_N
+        v_E_error = target_E_speed - v_E
+        v_error_vec = np.array([v_N_error, 0.0, v_E_error])
+        v_hor_error_mag = np.linalg.norm(v_error_vec)
 
         if type == "simple":
             "无加速度环期望姿态"
-            if v_hor_error < 5.0:
+            if v_hor_error_mag < 5.0:
                 # 需要更为平稳
-                target_point_ = target_point0_ - self.stable_pointing_pid.calculate(v_hor_error, dt=dt) \
-                    * np.array([v_N_error, 0.0, v_E_error])/(v_hor_error+1e-5)
+                target_point_ = target_point0_ + self.stable_pointing_pid.calculate(v_hor_error_mag, dt=dt) \
+                    * v_error_vec / (v_hor_error_mag + 1e-5)
             else:
                 # 需要快速
-                target_point_ = target_point0_ - \
-                    min(max_tan_lean_allowed, self.fast_pointing_pid.calculate(v_hor_error, dt=dt)) \
-                    * np.array([v_N_error, 0.0, v_E_error])/(v_hor_error+1e-5)
+                target_point_ = target_point0_ + \
+                    min(max_tan_lean_allowed, self.fast_pointing_pid.calculate(v_hor_error_mag, dt=dt)) \
+                    * v_error_vec / (v_hor_error_mag + 1e-5)
         else:
             # 加速度环失败的等效
             # temp =  self.hor_speed_pid.calculate(v_hor_error, dt=dt)
@@ -370,25 +371,30 @@ class rocket_control(object):
             #         * np.array([v_N_error, 0.0, v_E_error])/(v_hor_error+1e-5)
 
             "带加速度环期望姿态"
-            # 计算当前水平加速度分量（使用推力投影，未考虑空气阻力）
+            # 计算当前水平加速度分量
             a_N = self.current_twr * self.g * thrust_direction_[0]
             a_E = self.current_twr * self.g * thrust_direction_[2]
-            # 期望加速度
-            target_a_hor = - self.hor_speed_pid.calculate(v_hor_error, dt=dt)
-            target_N_a = target_a_hor * v_N_error/(v_hor_error+1e-5)
-            target_E_a = target_a_hor * v_E_error/(v_hor_error+1e-5)
-            # 加速度环误差
-            a_N_error = a_N - target_N_a
-            a_E_error = a_E - target_E_a
-            a_hor_error = np.sqrt(a_N_error**2 + a_E_error**2)
-            # 期望指向计算
-            target_point_hor0_ = np.array([a_N_error, 0.0, a_E_error])
-            target_point_hor_ = - self.hor_acc_pid.calculate(a_hor_error, dt=dt) * \
-                target_point_hor0_/(norm(target_point_hor0_)+1e-5)
-            # 加速度环后指向控制
+            
+            # 期望加速度 (规范化：由速度误差计算目标加速度)
+            # v_error_vec 是目标减当前，所以 pid 计算出的就是目标加速度方向
+            target_a_hor_mag = self.hor_speed_pid.calculate(v_hor_error_mag, dt=dt)
+            target_N_a = target_a_hor_mag * v_N_error / (v_hor_error_mag + 1e-5)
+            target_E_a = target_a_hor_mag * v_E_error / (v_hor_error_mag + 1e-5)
+            
+            # 加速度环误差 (规范化：目标 - 当前)
+            a_N_error = target_N_a - a_N
+            a_E_error = target_E_a - a_E
+            a_error_vec = np.array([a_N_error, 0.0, a_E_error])
+            a_hor_error_mag = np.linalg.norm(a_error_vec)
+            
+            # 期望指向计算 (规范化：利用加速度误差直接补偿指向)
+            target_point_hor_ = self.hor_acc_pid.calculate(a_hor_error_mag, dt=dt) * \
+                a_error_vec / (a_hor_error_mag + 1e-5)
+            
+            # 最终指向 = 默认向上 + 指向修正
             target_point_ = target_point0_ + target_point_hor_ * \
-                min(max_tan_lean_allowed, self.pointing_pid.calculate(v_hor_error, dt=dt)*norm(target_point_hor_))/ \
-                (norm(target_point_hor_)+1e-5)
+                min(max_tan_lean_allowed, self.pointing_pid.calculate(v_hor_error_mag, dt=dt) * norm(target_point_hor_)) / \
+                (norm(target_point_hor_) + 1e-5)
 
         "姿态控制"    
         # 归一化
