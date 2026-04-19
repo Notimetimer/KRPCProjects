@@ -278,20 +278,47 @@ class rocket_control(object):
         # 归一化
         target_point_ = target_point_/(np.linalg.norm(target_point_)+1e-5)
         
-        # # 变换，防止bx_surf与期望之间角度为钝角
-        temp = copy.deepcopy(self.bx_surf)*0.9 + copy.deepcopy(target_point_) # 拷贝数值
-        target_point1_ = temp/(norm(temp)+1e-5) # 重新引用
+        # 试验姿态控制量求解法，用于适应发动机有安装角的情况：
+        # 1、求发动机指向和期望指向之间的角度误差（矢量）以及期望角速度误差（矢量）；
+        # 2、把这些误差分别和xyz三轴点积；
+        # 3、以误差角度标量为缩放比例，各轴的分量为权重，把控制分配到各个轴上;
 
-        # 1
-        tmp = np.cross(self.bx_surf, target_point1_)
-        # print("target_point_", target_point1_)
+        pointing_err_ = np.cross(self.bx_surf, target_point_) # 角度误差矢量
+        turining_err_ = np.array([0,0,0]) # 和期望角速度有关，待续
 
-        # 瞎写的，效果竟然挺好
-        yaw_cmd = float(np.dot(tmp, self.by_surf)*0.99999) *2
-        pitch_cmd = float(np.dot(tmp, self.bz_surf)*0.99999) *2
+        control_power = np.arcsin(norm(pointing_err_)/(1.0001**2)) # 误差角度的绝对值（大小）
+        roll_cmd_part = float(np.dot(pointing_err_, self.bx_surf)*0.99999)
+        yaw_cmd_part = float(np.dot(pointing_err_, - self.by_surf)*0.99999)
+        pitch_cmd_part = float(np.dot(pointing_err_, self.bz_surf)*0.99999)
 
-        control.pitch = self.pitch_pid.calculate(pitch_cmd, dt=dt, d_error=-self.q)
-        control.yaw = self.yaw_pid.calculate(-yaw_cmd, dt=dt, d_error=-self.r)
+        # 控制量=大小*配比
+        roll_cmd = 2 * control_power/pi * roll_cmd_part /norm(pointing_err_)
+        yaw_cmd = 2 * control_power/pi *  yaw_cmd_part /norm(pointing_err_)
+        pitch_cmd = 2 * control_power/pi *  pitch_cmd_part /norm(pointing_err_)
+
+        # 角速度误差，这里期望角速度一律为0
+        roll_rate_error = -self.p
+        pitch_rate_error = -self.q
+        yaw_rate_error = -self.r
+
+        # roll 空置，没有安装角也没有对应的PID控制器
+        control.pitch = self.pitch_pid.calculate(pitch_cmd, dt=dt, d_error=pitch_rate_error)
+        control.yaw = self.yaw_pid.calculate(yaw_cmd, dt=dt, d_error=yaw_rate_error)
+
+        # # # 变换，防止bx_surf与期望之间角度为钝角
+        # temp = copy.deepcopy(self.bx_surf)*0.9 + copy.deepcopy(target_point_) # 拷贝数值
+        # target_point1_ = temp/(norm(temp)+1e-5) # 重新引用
+
+        # # 1
+        # tmp = np.cross(self.bx_surf, target_point1_)
+        # # print("target_point_", target_point1_)
+
+        # # 瞎写的，效果竟然挺好
+        # yaw_cmd = float(np.dot(tmp, self.by_surf)*0.99999) *2
+        # pitch_cmd = float(np.dot(tmp, self.bz_surf)*0.99999) *2
+
+        # control.pitch = self.pitch_pid.calculate(pitch_cmd, dt=dt, d_error=-self.q)
+        # control.yaw = self.yaw_pid.calculate(-yaw_cmd, dt=dt, d_error=-self.r)
 
     # 自动缓降
     def slow_descend_controll(self, dt=0.05):
@@ -339,21 +366,48 @@ class rocket_control(object):
                 * np.array([self.velocity_surf[0], 0.0, self.velocity_surf[2]])/(v_hor+1e-5)
         # 归一化
         target_point_ = target_point_/(np.linalg.norm(target_point_)+1e-5)
-        
-        # # 变换，防止bx_surf与期望之间角度为钝角
-        temp = copy.deepcopy(self.bx_surf)*0.9 + copy.deepcopy(target_point_) # 拷贝数值
-        target_point_1 = temp/(norm(temp)+1e-5) # 重新引用
 
-        # 1
-        tmp = np.cross(self.bx_surf, target_point_1)
-        # print("target_point_", target_point_1)
+        # 试验姿态控制量求解法，用于适应发动机有安装角的情况：
+        # 1、求发动机指向和期望指向之间的角度误差（矢量）以及期望角速度误差（矢量）；
+        # 2、把这些误差分别和xyz三轴点积；
+        # 3、以误差角度标量为缩放比例，各轴的分量为权重，把控制分配到各个轴上;
 
-        # 瞎写的，效果竟然挺好
-        yaw_cmd = float(np.dot(tmp, self.by_surf)*0.99999) *2
-        pitch_cmd = float(np.dot(tmp, self.bz_surf)*0.99999) *2
+        pointing_err_ = np.cross(self.bx_surf, target_point_) # 角度误差矢量
+        turining_err_ = np.array([0,0,0]) # 和期望角速度有关，待续
 
-        control.pitch = self.pitch_pid.calculate(pitch_cmd, dt=dt, d_error=-self.q)
-        control.yaw = self.yaw_pid.calculate(-yaw_cmd, dt=dt, d_error=-self.r)
+        control_power = np.arcsin(norm(pointing_err_)/(1.0001**2)) # 误差角度的绝对值（大小）
+        roll_cmd_part = float(np.dot(pointing_err_, self.bx_surf)*0.99999)
+        yaw_cmd_part = float(np.dot(pointing_err_, - self.by_surf)*0.99999)
+        pitch_cmd_part = float(np.dot(pointing_err_, self.bz_surf)*0.99999)
+
+        # 控制量=大小*配比
+        roll_cmd = 2 * control_power/pi * roll_cmd_part /norm(pointing_err_)
+        yaw_cmd = 2 * control_power/pi *  yaw_cmd_part /norm(pointing_err_)
+        pitch_cmd = 2 * control_power/pi *  pitch_cmd_part /norm(pointing_err_)
+
+        # 角速度误差，这里期望角速度一律为0
+        roll_rate_error = -self.p
+        pitch_rate_error = -self.q
+        yaw_rate_error = -self.r
+
+        # roll 空置，没有安装角也没有对应的PID控制器
+        control.pitch = self.pitch_pid.calculate(pitch_cmd, dt=dt, d_error=pitch_rate_error)
+        control.yaw = self.yaw_pid.calculate(yaw_cmd, dt=dt, d_error=yaw_rate_error)
+
+        # # # 变换，防止bx_surf与期望之间角度为钝角
+        # temp = copy.deepcopy(self.bx_surf)*0.9 + copy.deepcopy(target_point_) # 拷贝数值
+        # target_point_1 = temp/(norm(temp)+1e-5) # 重新引用
+
+        # # 1
+        # tmp = np.cross(self.bx_surf, target_point_1)
+        # # print("target_point_", target_point_1)
+
+        # # 瞎写的，效果竟然挺好
+        # yaw_cmd = float(np.dot(tmp, self.by_surf)*0.99999) *2
+        # pitch_cmd = float(np.dot(tmp, self.bz_surf)*0.99999) *2
+
+        # control.pitch = self.pitch_pid.calculate(pitch_cmd, dt=dt, d_error=-self.q)
+        # control.yaw = self.yaw_pid.calculate(-yaw_cmd, dt=dt, d_error=-self.r)
 
     # 定高
     def rocket_height_maintainence(self, 
@@ -430,36 +484,63 @@ class rocket_control(object):
         "姿态控制"    
         # 归一化
         target_point_ = target_point_/(np.linalg.norm(target_point_)+1e-5)
+
+        # 试验姿态控制量求解法，用于适应发动机有安装角的情况：
+        # 1、求发动机指向和期望指向之间的角度误差（矢量）以及期望角速度误差（矢量）；
+        # 2、把这些误差分别和xyz三轴点积；
+        # 3、以误差角度标量为缩放比例，各轴的分量为权重，把控制分配到各个轴上;
+
+        pointing_err_ = np.cross(self.bx_surf, target_point_) # 角度误差矢量
+        turining_err_ = np.array([0,0,0]) # 和期望角速度有关，待续
+
+        control_power = np.arcsin(norm(pointing_err_)/(1.0001**2)) # 误差角度的绝对值（大小）
+        roll_cmd_part = float(np.dot(pointing_err_, self.bx_surf)*0.99999)
+        yaw_cmd_part = float(np.dot(pointing_err_, - self.by_surf)*0.99999)
+        pitch_cmd_part = float(np.dot(pointing_err_, self.bz_surf)*0.99999)
+
+        # 控制量=大小*配比
+        roll_cmd = 2 * control_power/pi * roll_cmd_part /norm(pointing_err_)
+        yaw_cmd = 2 * control_power/pi *  yaw_cmd_part /norm(pointing_err_)
+        pitch_cmd = 2 * control_power/pi *  pitch_cmd_part /norm(pointing_err_)
+
+        # 角速度误差，这里期望角速度一律为0
+        roll_rate_error = -self.p
+        pitch_rate_error = -self.q
+        yaw_rate_error = -self.r
+
+        # roll 空置，没有安装角也没有对应的PID控制器
+        control.pitch = self.pitch_pid.calculate(pitch_cmd, dt=dt, d_error=pitch_rate_error)
+        control.yaw = self.yaw_pid.calculate(yaw_cmd, dt=dt, d_error=yaw_rate_error)
         
-        # # 变换，防止bx_surf与期望之间角度为钝角
-        temp = copy.deepcopy(self.bx_surf)*0.9 + copy.deepcopy(target_point_) # 拷贝数值
-        target_point1_ = temp/(norm(temp)+1e-5) # 重新引用
+        # # # 变换，防止bx_surf与期望之间角度为钝角
+        # temp = copy.deepcopy(self.bx_surf)*0.9 + copy.deepcopy(target_point_) # 拷贝数值
+        # target_point1_ = temp/(norm(temp)+1e-5) # 重新引用
 
-        # 1
-        tmp = np.cross(self.bx_surf, target_point1_)
-        # print("target_point_", target_point1_)
+        # # 1
+        # tmp = np.cross(self.bx_surf, target_point1_)
+        # # print("target_point_", target_point1_)
 
-        # 用sin值做近似
-        # yaw_cmd = float(np.dot(tmp, self.by_surf)*0.99999) *2
-        # pitch_cmd = float(np.dot(tmp, self.bz_surf)*0.99999) *2
-        # # 直接用角度
-        yaw_cmd = np.arcsin(float(np.dot(tmp, self.by_surf)*0.99999)) * 2/pi
-        pitch_cmd = np.arcsin(float(np.dot(tmp, self.bz_surf)*0.99999)) * 2/pi
+        # # 用sin值做近似
+        # # yaw_cmd = float(np.dot(tmp, self.by_surf)*0.99999) *2
+        # # pitch_cmd = float(np.dot(tmp, self.bz_surf)*0.99999) *2
+        # # # 直接用角度
+        # yaw_cmd = np.arcsin(float(np.dot(tmp, self.by_surf)*0.99999)) * 2/pi
+        # pitch_cmd = np.arcsin(float(np.dot(tmp, self.bz_surf)*0.99999)) * 2/pi
 
-        # # 按键映射覆盖：w/s 控制 pitch，a/d 控制 yaw，e/q 控制 roll，z/x 控制油门
-        # if keyboard.is_pressed('w'):
-        #     control.pitch = -1
-        # elif keyboard.is_pressed('s'):
-        #     control.pitch = 1
-        # else:
-        control.pitch = self.pitch_pid.calculate(pitch_cmd, dt=dt, d_error=-self.q)
+        # # # 按键映射覆盖：w/s 控制 pitch，a/d 控制 yaw，e/q 控制 roll，z/x 控制油门
+        # # if keyboard.is_pressed('w'):
+        # #     control.pitch = -1
+        # # elif keyboard.is_pressed('s'):
+        # #     control.pitch = 1
+        # # else:
+        # control.pitch = self.pitch_pid.calculate(pitch_cmd, dt=dt, d_error=-self.q)
 
-        # if keyboard.is_pressed('a'):
-        #     control.yaw = -1
-        # elif keyboard.is_pressed('d'):
-        #     control.yaw = 1
-        # else:
-        control.yaw = self.yaw_pid.calculate(-yaw_cmd, dt=dt, d_error=-self.r)
+        # # if keyboard.is_pressed('a'):
+        # #     control.yaw = -1
+        # # elif keyboard.is_pressed('d'):
+        # #     control.yaw = 1
+        # # else:
+        # control.yaw = self.yaw_pid.calculate(-yaw_cmd, dt=dt, d_error=-self.r)
 
         # 自动定高 PID 输出油门
         throttle_cmd = self.height_controller.calculate(target_height - self.altitude_sea_level, dt=dt)
