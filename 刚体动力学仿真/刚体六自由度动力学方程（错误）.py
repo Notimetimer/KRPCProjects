@@ -192,7 +192,13 @@ class FlyingObject:
             omega_b_dot_mag = np.dot(omega_b_dot_, omega_b_)/(norm(omega_b_)+1e-8)
             omega_b_next_ = omega_b_next_ / (norm(omega_b_next_)+1e-8) * (norm(omega_b_) + omega_b_dot_mag * dt)
 
-        # 【极其关键的修复】：必须先更新姿态，再把体轴系的速度转回惯性系
+        # 角速度和速度转到惯性系
+        self.v_ = left_mutiple(self.R_i2b.T, v_b_next_)
+        self.omega_ = left_mutiple(self.R_i2b.T, omega_b_next_)
+
+        # 在惯性系更新位置和姿态
+        self.p_ += self.v_ * dt
+        # 这个方程唯独不能用惯性系下的角速度
         quat_dot = QuatDerivative(self.quat, omega_b_next_)
         quat_next = self.quat + quat_dot * dt
         # 更新旋转矩阵和旋转四元数
@@ -203,12 +209,6 @@ class FlyingObject:
         self.xb_ = self.R_i2b[0,:]
         self.yb_ = self.R_i2b[1,:]
         self.zb_ = self.R_i2b[2,:]
-
-        # 然后再用【全新】的旋转矩阵，把体轴系速度转回惯性系
-        self.v_ = left_mutiple(self.R_i2b.T, v_b_next_)
-        self.omega_ = left_mutiple(self.R_i2b.T, omega_b_next_)
-
-        self.p_ += self.v_ * dt
 
     def calc_acc_inert_frame(self, F_i_, M_i_, v_i_, omega_i_):
         # I_inertial = R.T * I_body * R
