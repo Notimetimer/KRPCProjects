@@ -293,16 +293,19 @@ if __name__ == '__main__':
 
     obj1, obj2 = FlyingObject(m, I_mat), FlyingObject(m, I_mat)
     
-    p0, v0 = np.array([0,0,0]), np.array([0,0,0])
-    q0, w0 = np.array([1,0,0,0]), np.array([0.01,8,0.01])
+    p0, v0 = np.array([0,0,0]), np.array([20,0,0])
+    q0, w0 = np.array([1,0,0,0]), np.array([0.001, 0.001, 0.21])
     
     obj1.reset(p0, v0, q0, w0)
     obj2.reset(p0, v0, q0, w0)
     
-    Fb = np.array([0, 0, 0]) 
+    Fb = np.array([0, 4, 0]) 
     Mb = np.array([0.0, 0.0, 0.0]) 
     
-    dt, steps = 0.01, 1000
+    dt = 0.01
+    max_time = 100
+    steps = int(max_time/dt)
+
     hist1, hist2 = [], []
 
     for i in range(steps):
@@ -353,7 +356,7 @@ if __name__ == '__main__':
         # 姿态子图设置
         for ax, title in [(ax_att1, "Attitude (Move 1)"), (ax_att2, "Attitude (Move 2)")]:
             ax.set_xlim([-1.2, 1.2]); ax.set_ylim([-1.2, 1.2]); ax.set_zlim([-1.2, 1.2])
-            ax.set_title(title); ax.set_xlabel('X'); ax.set_ylabel('Y')
+            ax.set_title(title); ax.set_xlabel('X'); ax.set_ylabel('Y'); ax.set_zlabel('Z')
 
         # 位置子图设置 (自动缩放)
         margin = 2
@@ -363,7 +366,7 @@ if __name__ == '__main__':
             ax.set_xlim([p_min[0]-margin, p_max[0]+margin])
             ax.set_ylim([p_min[1]-margin, p_max[1]+margin])
             ax.set_zlim([p_min[2]-margin, p_max[2]+margin])
-            ax.set_title(title); ax.set_xlabel('X (m)'); ax.set_ylabel('Y (m)')
+            ax.set_title(title); ax.set_xlabel('X (m)'); ax.set_ylabel('Y (m)'); ax.set_zlabel('Z')
         
         return (*lines_att1, *vecs_att1, *lines_att2, *vecs_att2, line_p1, point_p1, line_p2, point_p2)
 
@@ -393,7 +396,7 @@ if __name__ == '__main__':
         return (*lines_att1, *vecs_att1, *lines_att2, *vecs_att2, line_p1, point_p1, line_p2, point_p2)
 
     ani = FuncAnimation(fig, update, frames=steps//5, init_func=init, blit=True, interval=20, 
-                        repeat=False) # repeat表示循环播放
+                        repeat=1) # repeat表示循环播放
 
     plt.tight_layout()
     plt.show()
