@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
 # --- 核心算法类 ---
-def left_mutiple(M, v):
+def left_multiply(M, v):
     # 输入行向量和矩阵，当做列向量左乘矩阵来算
     return v @ (M.T)
 
@@ -116,24 +116,25 @@ def Quat2AxisAngle(q):
     u = np.array([q1, q2, q3]) / sin_half_alpha
     return u, alpha
 
-def QuatDerivative(q_i2b_, omega_b_):
+def QuatDerivative(q_i2b_, w_b_):
     """
-    四元数微分方程：dot(q) = 1/2 * Omega(omega) * q
-    omega: 机体角速度 [p, q, r]
+    四元数微分方程：dot(q) = 1/2 * w(w) * q
+    w: 机体角速度 [p, q, r]
     """
-    p, q_omega, r = omega_b_
+    p, q_w, r = w_b_
     q0, q1, q2, q3 = q_i2b_
     q_dot = 0.5 * np.array([
-        -p*q1 - q_omega*q2 - r*q3,
-        p*q0 + r*q2 - q_omega*q3,
-        q_omega*q0 - r*q1 + p*q3,
-        r*q0 + q_omega*q1 - p*q2
+        -p*q1 - q_w*q2 - r*q3,
+        p*q0 + r*q2 - q_w*q3,
+        q_w*q0 - r*q1 + p*q3,
+        r*q0 + q_w*q1 - p*q2
     ])
     return q_dot
 
 # 积分q_dot 后需要补充四元数归一化 q = q / np.linalg.norm(q)
 
-
+# 短期飞控动力学可以再体轴系做，但导航计算必须在惯性系
+# 辛普森积分在体轴系根本用不了，RK4也救不了体轴系积分运动的固有误差
 
 # 飞行器，不考虑牵连运动，且考虑相对惯性系的运动
 class FlyingObject:
@@ -143,12 +144,12 @@ class FlyingObject:
         self.I_inv = inv(I_b)
         self.R_i2b = np.eye(3) # 旋转矩阵
 
-    def reset(self, p0_, v0_, quat0, omega0_):
+    def reset(self, p0_, v0_, quat0, w0_):
         # 向量均为行向量，传入的均为惯性系下的观测量
         self.p_ = p0_.astype(float) # 相对惯性系
         self.v_ = v0_.astype(float) # 相对惯性系
         self.quat = quat0.astype(float) # 相对惯性系
-        self.omega_ = omega0_.astype(float) # 相对惯性系
+        self.w_ = w0_.astype(float) # 相对惯性系
         # 【重大修复】: 必须转置！Quat2RotMat 输出的是 b->i，其转置才是你定义的 i->b
         self.R_i2b = Quat2RotMat(self.quat).T 
         self.xb_ = self.R_i2b[0,:]
@@ -157,26 +158,26 @@ class FlyingObject:
         self.Gyroscopic_moment_b_ = np.zeros(3)
         self.Gyroscopic_moment_i_ = np.zeros(3)
 
-    def calc_acc_body_frame(self, F_b_, M_b_, v_b_, omega_b_):
+    def calc_acc_body_frame(self, F_b_, M_b_, v_b_, w_b_):
         # 体轴系质心动力学方程
-        v_b_dot_ = np.cross(v_b_, omega_b_) + F_b_/self.m
+        v_b_dot_ = np.cross(v_b_, w_b_) + F_b_/self.m
         # 旋转运动角加速度方程
-        self.Gyroscopic_moment_b_ = - np.cross(omega_b_, 
-                            left_mutiple(self.I_b, omega_b_))
-        omega_b_dot_ = left_mutiple(
+        self.Gyroscopic_moment_b_ = - np.cross(w_b_, 
+                            left_multiply(self.I_b, w_b_))
+        w_b_dot_ = left_multiply(
             self.I_inv, 
             M_b_ + self.Gyroscopic_moment_b_
             )
-        return v_b_dot_, omega_b_dot_
+        return v_b_dot_, w_b_dot_
     
     # 在体轴系计算加速度的状态更新
     def move1(self, F_b_, M_b_, dt):
         # 速度和角速度变换到体轴系
-        v_b_ = left_mutiple(self.R_i2b, self.v_)
-        omega_b_ = left_mutiple(self.R_i2b, self.omega_)
+        v_b_ = left_multiply(self.R_i2b, self.v_)
+        w_b_ = left_multiply(self.R_i2b, self.w_)
 
         # 体轴系动力学解算
-        v_b_dot_, omega_b_dot_ = self.calc_acc_body_frame(F_b_, M_b_, v_b_, omega_b_)
+        v_b_dot_, w_b_dot_ = self.calc_acc_body_frame(F_b_, M_b_, v_b_, w_b_)
         
         # 在体轴系更新速度与角速度
         # 线运动
@@ -187,19 +188,13 @@ class FlyingObject:
             v_b_next_ = v_b_next_ / (norm(v_b_next_)+1e-8) * (norm(v_b_) + v_b_dot_mag * dt)
 
         # 角运动
-        omega_b_next_ = omega_b_ + omega_b_dot_ * dt # 欧拉积分
-        if norm(omega_b_) > 1e-3:
-            omega_b_dot_mag = np.dot(omega_b_dot_, omega_b_)/(norm(omega_b_)+1e-8)
-            omega_b_next_ = omega_b_next_ / (norm(omega_b_next_)+1e-8) * (norm(omega_b_) + omega_b_dot_mag * dt)
+        w_b_next_ = w_b_ + w_b_dot_ * dt # 欧拉积分
+        if norm(w_b_) > 1e-3:
+            w_b_dot_mag = np.dot(w_b_dot_, w_b_)/(norm(w_b_)+1e-8)
+            w_b_next_ = w_b_next_ / (norm(w_b_next_)+1e-8) * (norm(w_b_) + w_b_dot_mag * dt)
 
-        # 角速度和速度转到惯性系，注意这里的错误在于还未更新姿态就做了矢量投影
-        self.v_ = left_mutiple(self.R_i2b.T, v_b_next_)
-        self.omega_ = left_mutiple(self.R_i2b.T, omega_b_next_)
-        # 在惯性系更新位置和姿态
-        self.p_ += self.v_ * dt
-
-        # 这个方程唯独不能用惯性系下的角速度
-        quat_dot = QuatDerivative(self.quat, omega_b_next_)
+        # 【极其关键的修复】：必须先更新姿态，再把体轴系的速度转回惯性系
+        quat_dot = QuatDerivative(self.quat, w_b_next_)
         quat_next = self.quat + quat_dot * dt
         # 更新旋转矩阵和旋转四元数
         self.quat = quat_next / norm(quat_next)
@@ -210,30 +205,36 @@ class FlyingObject:
         self.yb_ = self.R_i2b[1,:]
         self.zb_ = self.R_i2b[2,:]
 
-    def calc_acc_inert_frame(self, F_i_, M_i_, v_i_, omega_i_):
+        # 然后再用【全新】的旋转矩阵，把体轴系速度转回惯性系
+        self.v_ = left_multiply(self.R_i2b.T, v_b_next_)
+        self.w_ = left_multiply(self.R_i2b.T, w_b_next_)
+
+        self.p_ += self.v_ * dt
+
+    def calc_acc_inert_frame(self, F_i_, M_i_, v_i_, w_i_):
         # I_inertial = R.T * I_body * R
         I_i = self.R_i2b.T @ self.I_b @ self.R_i2b
         # 惯性系质心动力学方程
         v_i_dot_ = F_i_ / self.m
         # 惯性系角加速度方程
-        self.Gyroscopic_moment_i_ =  - np.cross(omega_i_,
-                                left_mutiple(I_i, omega_i_))
-        omega_i_dot_ = left_mutiple(
+        self.Gyroscopic_moment_i_ =  - np.cross(w_i_,
+                                left_multiply(I_i, w_i_))
+        w_i_dot_ = left_multiply(
             inv(I_i),
             M_i_ + self.Gyroscopic_moment_i_
             )
-        return v_i_dot_, omega_i_dot_
+        return v_i_dot_, w_i_dot_
 
     # 在惯性系计算加速度的状态更新
     def move2(self, F_b_, M_b_, dt):
         # 力和力矩、惯性张量变换到惯性系
-        F_i_= left_mutiple(self.R_i2b.T, F_b_)
-        M_i_ = left_mutiple(self.R_i2b.T, M_b_)
+        F_i_= left_multiply(self.R_i2b.T, F_b_)
+        M_i_ = left_multiply(self.R_i2b.T, M_b_)
         v_i_ = self.v_
-        omega_i_ = self.omega_
+        w_i_ = self.w_
         
         # 惯性系动力学解算
-        v_i_dot_, omega_i_dot_ = self.calc_acc_inert_frame(F_i_, M_i_, v_i_, omega_i_)
+        v_i_dot_, w_i_dot_ = self.calc_acc_inert_frame(F_i_, M_i_, v_i_, w_i_)
 
         # 在惯性系更新速度与角速度
         # 线运动
@@ -244,22 +245,22 @@ class FlyingObject:
             v_i_next_ = v_i_next_/(norm(v_i_next_) + 1e-8) * v_i
 
         # 角运动
-        omega_i_next_ = omega_i_ + omega_i_dot_ * dt
-        if norm(omega_i_) > 1e-3:
-            omega_i_dot_mag = np.dot(omega_i_dot_, omega_i_)/(norm(omega_i_)+1e-8)
-            omega_i = norm(omega_i_) + omega_i_dot_mag * dt
-            omega_i_next_ = omega_i_next_ / (norm(omega_i_next_)+1e-8) * omega_i
+        w_i_next_ = w_i_ + w_i_dot_ * dt
+        if norm(w_i_) > 1e-3:
+            w_i_dot_mag = np.dot(w_i_dot_, w_i_)/(norm(w_i_)+1e-8)
+            w_i = norm(w_i_) + w_i_dot_mag * dt
+            w_i_next_ = w_i_next_ / (norm(w_i_next_)+1e-8) * w_i
 
         # 更新角速度和速度
         self.v_ = v_i_next_
-        self.omega_ = omega_i_next_
+        self.w_ = w_i_next_
 
         # 在惯性系更新位置和姿态
         self.p_ += self.v_ * dt
 
-        if norm(self.omega_) > 1e-8:
-            axis_ = self.omega_ / norm(self.omega_)
-            alpha = norm(self.omega_) * dt
+        if norm(self.w_) > 1e-8:
+            axis_ = self.w_ / norm(self.w_)
+            alpha = norm(self.w_) * dt
             self.xb_ = RodRot(self.xb_, axis_, alpha)
             self.yb_ = RodRot(self.yb_, axis_, alpha)
             self.zb_ = RodRot(self.zb_, axis_, alpha)
@@ -276,7 +277,21 @@ class FlyingObject:
 
 # --- 仿真与绘图 ---
 if __name__ == '__main__':
-    m, I_mat = 10, np.diag([1, 1.5, 2])
+    m = 10
+    # 1. 先定义惯性主轴上的惯性矩 (必须满足三角不等式，例如 1+1.5 > 2)
+    I_principal = np.diag([1.0, 1.5, 2.0])
+    # 2. 定义一个旋转矩阵 (表示体轴相对于惯性主轴偏转了多少)
+    # 比如绕 Y 轴偏转 10 度
+    phi1 = np.radians(0)
+    theta1 = np.radians(0)
+    psi1 = np.radians(0)
+
+    R = RotMat_zyx(phi1, theta1, psi1)
+    # 3. 计算体轴系下的非对角惯性张量
+    # 公式: I_body = R * I_principal * R.T
+    I_mat = R @ I_principal @ R.T
+    print("非对角惯性矩阵:\n", I_mat)
+
     obj1, obj2 = FlyingObject(m, I_mat), FlyingObject(m, I_mat)
     
     p0, v0 = np.array([0,0,0]), np.array([0,0,0])

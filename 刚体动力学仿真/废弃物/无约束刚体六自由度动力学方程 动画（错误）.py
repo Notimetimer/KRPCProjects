@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
 # --- 核心算法类 ---
-def left_mutiple(M, v):
+def left_multiply(M, v):
     # 输入行向量和矩阵，当做列向量左乘矩阵来算
     return v @ (M.T)
 
@@ -195,8 +195,8 @@ class FlyingObject:
     def calc_w_dot_body_frame(self, M_b_, w_b_):
         # 旋转运动角加速度方程
         self.Gyroscopic_moment_b_ = - np.cross(w_b_, 
-                            left_mutiple(self.I_b, w_b_))
-        w_b_dot_ = left_mutiple(
+                            left_multiply(self.I_b, w_b_))
+        w_b_dot_ = left_multiply(
             self.I_inv, 
             M_b_ + self.Gyroscopic_moment_b_
             )
@@ -208,58 +208,7 @@ class FlyingObject:
     
     # 在体轴系计算加速度的状态更新，失败的做法，体轴只能算动力学，运动学只有在惯性系计算才不会有显著的误差累积
     def move_calc_in_b(self, F_b_, M_b_, dt):
-        # 非惯性系先算旋转，再算平移
-        w_b_ = left_mutiple(self.R_i2b, self.w_)
-        w_b_dot_ = self.calc_w_dot_body_frame(M_b_, w_b_)
-
-        # # 无处安放的旋转系质点动力学
-        # v_b_ = left_mutiple(self.R_i2b, self.v_)
-        # w_b_ = left_mutiple(self.R_i2b, self.w_)
-        # v_b_dot_ = self.calc_acc_body_frame(F_b_, v_b_, w_b_)
-
-        # 角运动
-        w_b_next_ = w_b_ + w_b_dot_ * dt # 欧拉积分2
-        # w_b_next_ = w_b_ + (w_b_dot_+self.w_dot_last_)/2 * dt # （旋转惯性系下不要用）梯形积分2
-        # self.w_dot_last_ = w_b_dot_
-        if norm(w_b_) > 1e-3:
-            w_b_dot_mag = np.dot(w_b_dot_, w_b_)/(norm(w_b_)+1e-8)
-            w_b_next_ = w_b_next_ / (norm(w_b_next_)+1e-8) * (norm(w_b_) + w_b_dot_mag * dt)
-
-
-        # 无处安放的旋转系质点动力学
-        v_b_ = left_mutiple(self.R_i2b, self.v_)
-        v_b_dot_ = self.calc_acc_body_frame(F_b_, v_b_, w_b_next_)
-
-
-        # 【极其关键的修复】：必须先更新姿态，再把体轴系的速度转回惯性系
-        quat_dot = QuatDerivative(self.quat, w_b_next_)
-        quat_next = self.quat + quat_dot * dt
-        # 更新旋转矩阵和旋转四元数
-        self.quat = quat_next / norm(quat_next)
-        # 【重大修复】：转置提取 i->b
-        self.R_i2b = Quat2RotMat(self.quat).T
-        # 姿态向量
-        self.xb_ = self.R_i2b[0,:]
-        self.yb_ = self.R_i2b[1,:]
-        self.zb_ = self.R_i2b[2,:]
-        self.w_ = left_mutiple(self.R_i2b.T, w_b_next_)
-
-        # 在体轴系更新速度与角速度
-        # 线运动
-        v_b_next_ = v_b_ + v_b_dot_ * dt # 欧拉积分1
-        # v_b_next_ = v_b_ + (v_b_dot_+self.v_dot_last_)/2 * dt # （旋转惯性系下不要用）梯形积分1
-        # self.v_dot_last_ = v_b_dot_
-        # 大小计算，防止被向心力加速
-        if norm(v_b_) > 1e-3:
-            v_b_dot_mag = np.dot(v_b_dot_, v_b_)/(norm(v_b_)+1e-8)
-            v_b_next_ = v_b_next_ / (norm(v_b_next_)+1e-8) * (norm(v_b_) + v_b_dot_mag * dt)
-        
-        # 回到惯性系更新位置
-        self.v_ = left_mutiple(self.R_i2b.T, v_b_next_)
-
-        self.p_ += self.v_ * dt # 欧拉积分3
-        # self.p_ += (self.v_ + self.v_last_)/2 * dt # 叠两层（旋转惯性系下不要用）梯形积分就是辛普森积分3
-        # self.v_last_ = self.v_
+        pass
 
     def calc_acc_inert_frame(self, F_i_, M_i_, v_i_, w_i_):
         # I_inertial = R.T * I_body * R
@@ -268,8 +217,8 @@ class FlyingObject:
         v_i_dot_ = F_i_ / self.m
         # 惯性系角加速度方程
         self.Gyroscopic_moment_i_ =  - np.cross(w_i_,
-                                left_mutiple(I_i, w_i_))
-        w_i_dot_ = left_mutiple(
+                                left_multiply(I_i, w_i_))
+        w_i_dot_ = left_multiply(
             inv(I_i),
             M_i_ + self.Gyroscopic_moment_i_
             )
@@ -278,8 +227,8 @@ class FlyingObject:
     # 在惯性系计算加速度的状态更新，运动学只有在惯性系计算才不会有显著的误差累积
     def move(self, F_b_, M_b_, dt):
         # 力和力矩、惯性张量变换到惯性系
-        F_i_= left_mutiple(self.R_i2b.T, F_b_)
-        M_i_ = left_mutiple(self.R_i2b.T, M_b_)
+        F_i_= left_multiply(self.R_i2b.T, F_b_)
+        M_i_ = left_multiply(self.R_i2b.T, M_b_)
         v_i_ = self.v_
         w_i_ = self.w_
 
@@ -330,6 +279,61 @@ class FlyingObject:
         # 【重大修复】: RotMat2Quat 期待传入 b->i 矩阵，而当前 self.R_i2b 是 i->b
         self.quat = RotMat2Quat(self.R_i2b.T)
 
+    # 在体轴系计算动力学，而在惯性系计算所有运动学
+    def move2(self, F_b_, M_b_, dt):
+        # 非惯性系先算旋转，再算平移
+        w_b_ = left_multiply(self.R_i2b, self.w_)
+        w_b_dot_ = self.calc_w_dot_body_frame(M_b_, w_b_)
+
+        # 无处安放的旋转系质点动力学
+        v_b_ = left_multiply(self.R_i2b, self.v_)
+        v_b_dot_ = self.calc_acc_body_frame(F_b_, v_b_, w_b_)
+
+        # 角运动
+        w_b_next_ = w_b_ + w_b_dot_ * dt # 欧拉积分2
+        # w_b_next_ = w_b_ + (w_b_dot_+self.w_dot_last_)/2 * dt # （旋转惯性系下不要用）梯形积分2
+        # self.w_dot_last_ = w_b_dot_
+        if norm(w_b_) > 1e-3:
+            w_b_dot_mag = np.dot(w_b_dot_, w_b_)/(norm(w_b_)+1e-8)
+            w_b_next_ = w_b_next_ / (norm(w_b_next_)+1e-8) * (norm(w_b_) + w_b_dot_mag * dt)
+
+
+        # # 无处安放的旋转系质点动力学
+        # v_b_ = left_multiply(self.R_i2b, self.v_)
+        # v_b_dot_ = self.calc_acc_body_frame(F_b_, v_b_, w_b_next_)
+
+
+        # 【极其关键的修复】：必须先更新姿态，再把体轴系的速度转回惯性系
+        quat_dot = QuatDerivative(self.quat, w_b_next_)
+        quat_next = self.quat + quat_dot * dt
+        # 更新旋转矩阵和旋转四元数
+        self.quat = quat_next / norm(quat_next)
+        # 【重大修复】：转置提取 i->b
+        self.R_i2b = Quat2RotMat(self.quat).T
+        # 姿态向量
+        self.xb_ = self.R_i2b[0,:]
+        self.yb_ = self.R_i2b[1,:]
+        self.zb_ = self.R_i2b[2,:]
+        self.w_ = left_multiply(self.R_i2b.T, w_b_next_)
+
+        # 在体轴系更新速度与角速度
+        # 线运动
+        v_b_next_ = v_b_ + v_b_dot_ * dt # 欧拉积分1
+        # v_b_next_ = v_b_ + (v_b_dot_+self.v_dot_last_)/2 * dt # （旋转惯性系下不要用）梯形积分1
+        # self.v_dot_last_ = v_b_dot_
+        # 大小计算，防止被向心力加速
+        if norm(v_b_) > 1e-3:
+            v_b_dot_mag = np.dot(v_b_dot_, v_b_)/(norm(v_b_)+1e-8)
+            v_b_next_ = v_b_next_ / (norm(v_b_next_)+1e-8) * (norm(v_b_) + v_b_dot_mag * dt)
+        
+        # 回到惯性系更新位置
+        self.v_ = left_multiply(self.R_i2b.T, v_b_next_)
+
+        self.p_ += self.v_ * dt # 欧拉积分3
+        # self.p_ += (self.v_ + self.v_last_)/2 * dt # 叠两层（旋转惯性系下不要用）梯形积分就是辛普森积分3
+        # self.v_last_ = self.v_
+        
+
 # --- 仿真与绘图 ---
 if __name__ == '__main__':
     m = 10
@@ -365,8 +369,8 @@ if __name__ == '__main__':
     hist1, hist2 = [], []
 
     for i in range(steps):
-        obj1.move_calc_in_b(Fb, Mb, dt)
-        obj2.move(Fb, Mb, dt)
+        obj1.move(Fb, Mb, dt)
+        obj2.move2(Fb, Mb, dt)
         hist1.append({'p': obj1.p_.copy(), 'x': obj1.xb_.copy(), 'y':obj1.yb_.copy(), 'z':obj1.zb_.copy()})
         hist2.append({'p': obj2.p_.copy(), 'x': obj2.xb_.copy(), 'y':obj2.yb_.copy(), 'z':obj2.zb_.copy()})
 
@@ -392,7 +396,7 @@ if __name__ == '__main__':
     from matplotlib.animation import FuncAnimation
 
     fig = plt.figure(figsize=(15, 10))
-    fig.suptitle("6-DOF Dynamics Sync Animation: Move 1 (Body) vs Move 2 (Inertial)", fontsize=16)
+    fig.suptitle("6-DOF Dynamics Sync Animation: Move 1 (Inertail) vs Move 2 (Body)", fontsize=16)
 
     # 创建4个子图 (2x2 布局)
     ax_att1 = fig.add_subplot(2, 2, 1, projection='3d')

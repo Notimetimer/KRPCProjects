@@ -1,7 +1,7 @@
 from math import *
 import numpy as np
 
-def left_mutiple(M, v):
+def left_multiply(M, v):
     # 输入行向量和矩阵，当做列向量左乘矩阵来算
     return v@(M.T)
 
@@ -87,18 +87,18 @@ def Quat2AxisAngle(q):
     u = np.array([q1, q2, q3]) / sin_half_alpha
     return u, alpha
 
-def QuatDerivative(q, omega):
+def QuatDerivative(q, w):
     """
-    四元数微分方程：dot(q) = 1/2 * Omega(omega) * q
-    omega: 机体角速度 [p, q, r]
+    四元数微分方程：dot(q) = 1/2 * w(w) * q
+    w: 机体角速度 [p, q, r]
     """
-    p, q_omega, r = omega
+    p, q_w, r = w
     q0, q1, q2, q3 = q
     q_dot = 0.5 * np.array([
-        -p*q1 - q_omega*q2 - r*q3,
-        p*q0 + r*q2 - q_omega*q3,
-        q_omega*q0 - r*q1 + p*q3,
-        r*q0 + q_omega*q1 - p*q2
+        -p*q1 - q_w*q2 - r*q3,
+        p*q0 + r*q2 - q_w*q3,
+        q_w*q0 - r*q1 + p*q3,
+        r*q0 + q_w*q1 - p*q2
     ])
     return q_dot
 
