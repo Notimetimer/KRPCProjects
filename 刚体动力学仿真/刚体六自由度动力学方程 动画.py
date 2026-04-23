@@ -156,6 +156,10 @@ class FlyingObject:
         self.zb_ = self.R_i2b[2,:]
         self.Gyroscopic_moment_b_ = np.zeros(3)
         self.Gyroscopic_moment_i_ = np.zeros(3)
+        # 辛普森积分记忆项
+        self.v_last_ = np.zeros(3) # 惯性系
+        self.v_dot_last_ = np.zeros(3) # 跟随计算所用的坐标系
+        self.omega_dot_last_ = np.zeros(3) # 跟随计算所用的坐标系
 
     def calc_acc_body_frame(self, F_b_, M_b_, v_b_, omega_b_):
         # 体轴系质心动力学方程
@@ -180,14 +184,18 @@ class FlyingObject:
         
         # 在体轴系更新速度与角速度
         # 线运动
-        v_b_next_ = v_b_ + v_b_dot_ * dt # 欧拉积分
+        v_b_next_ = v_b_ + v_b_dot_ * dt # 欧拉积分1
+        # v_b_next_ = v_b_ + (v_b_dot_+self.v_dot_last_)/2 * dt # 梯形积分1
+        # self.v_dot_last_ = v_b_dot_
         # 大小计算，防止被向心力加速
         if norm(v_b_) > 1e-3:
             v_b_dot_mag = np.dot(v_b_dot_, v_b_)/(norm(v_b_)+1e-8)
             v_b_next_ = v_b_next_ / (norm(v_b_next_)+1e-8) * (norm(v_b_) + v_b_dot_mag * dt)
 
         # 角运动
-        omega_b_next_ = omega_b_ + omega_b_dot_ * dt # 欧拉积分
+        omega_b_next_ = omega_b_ + omega_b_dot_ * dt # 欧拉积分2
+        # omega_b_next_ = omega_b_ + (omega_b_dot_+self.omega_dot_last_)/2 * dt # 梯形积分2
+        # self.omega_dot_last_ = omega_b_dot_
         if norm(omega_b_) > 1e-3:
             omega_b_dot_mag = np.dot(omega_b_dot_, omega_b_)/(norm(omega_b_)+1e-8)
             omega_b_next_ = omega_b_next_ / (norm(omega_b_next_)+1e-8) * (norm(omega_b_) + omega_b_dot_mag * dt)
@@ -208,7 +216,9 @@ class FlyingObject:
         self.v_ = left_mutiple(self.R_i2b.T, v_b_next_)
         self.omega_ = left_mutiple(self.R_i2b.T, omega_b_next_)
 
-        self.p_ += self.v_ * dt
+        self.p_ += self.v_ * dt # 欧拉积分3
+        # self.p_ += (self.v_ + self.v_last_)/2 * dt # 叠两层梯形积分就是辛普森积分3
+        # self.v_last_ = self.v_
 
     def calc_acc_inert_frame(self, F_i_, M_i_, v_i_, omega_i_):
         # I_inertial = R.T * I_body * R
@@ -231,20 +241,24 @@ class FlyingObject:
         M_i_ = left_mutiple(self.R_i2b.T, M_b_)
         v_i_ = self.v_
         omega_i_ = self.omega_
-        
+
         # 惯性系动力学解算
         v_i_dot_, omega_i_dot_ = self.calc_acc_inert_frame(F_i_, M_i_, v_i_, omega_i_)
 
         # 在惯性系更新速度与角速度
         # 线运动
-        v_i_next_ = self.v_ + v_i_dot_ * dt
+        v_i_next_ = self.v_ + v_i_dot_ * dt # 欧拉积分1
+        # v_i_next_ = self.v_ + (v_i_dot_ + self.v_dot_last_)/2 * dt # 梯形积分1
+        # self.v_dot_last_ = v_i_dot_
         if norm(v_i_) > 1e-3:
             v_i_dot_mag = np.dot(v_i_dot_, v_i_)/(norm(v_i_)+1e-8)
             v_i = norm(v_i_) + v_i_dot_mag * dt
             v_i_next_ = v_i_next_/(norm(v_i_next_) + 1e-8) * v_i
 
         # 角运动
-        omega_i_next_ = omega_i_ + omega_i_dot_ * dt
+        omega_i_next_ = omega_i_ + omega_i_dot_ * dt # 欧拉积分2
+        # omega_i_next_ = omega_i_ + (omega_i_dot_ + self.omega_dot_last_)/2 * dt # 梯形积分2
+        # self.omega_dot_last_ = omega_i_dot_
         if norm(omega_i_) > 1e-3:
             omega_i_dot_mag = np.dot(omega_i_dot_, omega_i_)/(norm(omega_i_)+1e-8)
             omega_i = norm(omega_i_) + omega_i_dot_mag * dt
@@ -255,8 +269,9 @@ class FlyingObject:
         self.omega_ = omega_i_next_
 
         # 在惯性系更新位置和姿态
-        self.p_ += self.v_ * dt
-
+        self.p_ += self.v_ * dt # 欧拉积分3
+        # self.p_ += (self.v_+self.v_last_)/2 * dt  # 叠两层梯形积分就是辛普森积分3
+        # self.v_last_ = self.v_
         if norm(self.omega_) > 1e-8:
             axis_ = self.omega_ / norm(self.omega_)
             alpha = norm(self.omega_) * dt
@@ -294,7 +309,7 @@ if __name__ == '__main__':
     obj1, obj2 = FlyingObject(m, I_mat), FlyingObject(m, I_mat)
     
     p0, v0 = np.array([0,0,0]), np.array([20,0,0])
-    q0, w0 = np.array([1,0,0,0]), np.array([0.001, 0.001, 0.21])
+    q0, w0 = np.array([1,0,0,0]), np.array([0.001, 8.001, 0.21])
     
     obj1.reset(p0, v0, q0, w0)
     obj2.reset(p0, v0, q0, w0)
@@ -324,8 +339,8 @@ if __name__ == '__main__':
     y2 = np.array([h['y'] for h in hist2])
     z2 = np.array([h['z'] for h in hist2])
 
-    print(f"Final Position Error: {norm(p1[-1] - p2[-1]):.6e}")
-    print(f"Final Attitude Vector Error: {norm(x1[-1] - x2[-1]):.6e}")
+    print(f"Avg Position Error: {norm(p1[-1] - p2[-1])/steps:.6e}")
+    print(f"Avg Attitude Vector Error: {norm(x1[-1] - x2[-1])/steps:.6e}")
 
     # --- 同步动画与绘图 (4个子图同步对比) ---
     from matplotlib.animation import FuncAnimation
