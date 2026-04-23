@@ -27,6 +27,34 @@ def RotMat_zyx(phi, theta, psi):
     ])
     return R_phi@R_theta@R_psi
 
+# 惯性系下的RK4积分（核心状态：p_i, v_i, quat）
+def rk4_step(obj, F_b, M_b, dt):
+    # 定义状态导数函数（惯性系）
+    def state_deriv(p, v, quat, w):
+        R_i2b = Quat2RotMat(quat).T  # 惯性→体轴旋转矩阵
+        F_i = R_i2b.T @ F_b          # 体轴力转惯性系
+        M_i = R_i2b.T @ M_b          # 体轴力矩转惯性系
+        I_i = R_i2b.T @ obj.I_b @ R_i2b  # 体轴惯性张量转惯性系
+        
+        # 惯性系动力学导数
+        v_dot = F_i / obj.m
+        w_dot = inv(I_i) @ (M_i - np.cross(w, I_i @ w))
+        quat_dot = QuatDerivative(quat, R_i2b @ w)  # 四元数导数（体轴角速度输入）
+        return np.hstack([v, v_dot, w, quat_dot])
+    
+    # RK4四步迭代
+    k1 = state_deriv(obj.p_, obj.v_, obj.quat, obj.w_)
+    k2 = state_deriv(obj.p_+k1[:3]*dt/2, obj.v_+k1[3:6]*dt/2, obj.quat+k1[9:]*dt/2, obj.w_+k1[6:9]*dt/2)
+    k3 = state_deriv(obj.p_+k2[:3]*dt/2, obj.v_+k2[3:6]*dt/2, obj.quat+k2[9:]*dt/2, obj.w_+k2[6:9]*dt/2)
+    k4 = state_deriv(obj.p_+k3[:3]*dt, obj.v_+k3[3:6]*dt, obj.quat+k3[9:]*dt, obj.w_+k3[6:9]*dt)
+    
+    # 更新状态
+    obj.p_ += (k1[:3] + 2*k2[:3] + 2*k3[:3] + k4[:3]) * dt/6
+    obj.v_ += (k1[3:6] + 2*k2[3:6] + 2*k3[3:6] + k4[3:6]) * dt/6
+    obj.w_ += (k1[6:9] + 2*k2[6:9] + 2*k3[6:9] + k4[6:9]) * dt/6
+    obj.quat += (k1[9:] + 2*k2[9:] + 2*k3[9:] + k4[9:]) * dt/6
+    obj.quat /= norm(obj.quat)  # 四元数归一化（关键！）
+
 # 【重大修复】：工业级鲁棒的旋转矩阵转四元数，防止 np.sign(0) 导致奇异崩溃
 # 注意：该函数标准期待输入为 Rb->i 矩阵
 def RotMat2Quat(R):
@@ -116,24 +144,25 @@ def Quat2AxisAngle(q):
     u = np.array([q1, q2, q3]) / sin_half_alpha
     return u, alpha
 
-def QuatDerivative(q_i2b_, omega_b_):
+def QuatDerivative(q_i2b_, w_b_):
     """
-    四元数微分方程：dot(q) = 1/2 * Omega(omega) * q
-    omega: 机体角速度 [p, q, r]
+    四元数微分方程：dot(q) = 1/2 * w(w) * q
+    w: 机体角速度 [p, q, r]
     """
-    p, q_omega, r = omega_b_
+    p, q_w, r = w_b_
     q0, q1, q2, q3 = q_i2b_
     q_dot = 0.5 * np.array([
-        -p*q1 - q_omega*q2 - r*q3,
-        p*q0 + r*q2 - q_omega*q3,
-        q_omega*q0 - r*q1 + p*q3,
-        r*q0 + q_omega*q1 - p*q2
+        -p*q1 - q_w*q2 - r*q3,
+        p*q0 + r*q2 - q_w*q3,
+        q_w*q0 - r*q1 + p*q3,
+        r*q0 + q_w*q1 - p*q2
     ])
     return q_dot
 
 # 积分q_dot 后需要补充四元数归一化 q = q / np.linalg.norm(q)
 
-
+# 短期飞控动力学可以再体轴系做，但导航计算必须在惯性系
+# 辛普森积分在体轴系根本用不了，RK4也救不了体轴系积分运动的固有误差
 
 # 飞行器，不考虑牵连运动，且考虑相对惯性系的运动
 class FlyingObject:
@@ -143,12 +172,12 @@ class FlyingObject:
         self.I_inv = inv(I_b)
         self.R_i2b = np.eye(3) # 旋转矩阵
 
-    def reset(self, p0_, v0_, quat0, omega0_):
+    def reset(self, p0_, v0_, quat0, w0_):
         # 向量均为行向量，传入的均为惯性系下的观测量
         self.p_ = p0_.astype(float) # 相对惯性系
         self.v_ = v0_.astype(float) # 相对惯性系
         self.quat = quat0.astype(float) # 相对惯性系
-        self.omega_ = omega0_.astype(float) # 相对惯性系
+        self.w_ = w0_.astype(float) # 相对惯性系
         # 【重大修复】: 必须转置！Quat2RotMat 输出的是 b->i，其转置才是你定义的 i->b
         self.R_i2b = Quat2RotMat(self.quat).T 
         self.xb_ = self.R_i2b[0,:]
@@ -156,52 +185,54 @@ class FlyingObject:
         self.zb_ = self.R_i2b[2,:]
         self.Gyroscopic_moment_b_ = np.zeros(3)
         self.Gyroscopic_moment_i_ = np.zeros(3)
-        # 辛普森积分记忆项
-        self.v_last_ = np.zeros(3) # 惯性系
-        self.v_dot_last_ = np.zeros(3) # 跟随计算所用的坐标系
-        self.omega_dot_last_ = np.zeros(3) # 跟随计算所用的坐标系
-
-    def calc_acc_body_frame(self, F_b_, M_b_, v_b_, omega_b_):
-        # 体轴系质心动力学方程
-        v_b_dot_ = np.cross(v_b_, omega_b_) + F_b_/self.m
+        # 非线性（含旋转不能用（旋转惯性系下不要用）梯形积分，辛普森积分也不适合用在体轴系）
+        # # 辛普森积分记忆项
+        # self.v_last_ = np.zeros(3) # 惯性系
+        # self.v_dot_last_ = np.zeros(3) # 跟随计算所用的坐标系
+        # self.w_dot_last_ = np.zeros(3) # 跟随计算所用的坐标系
+    
+    # 体轴系动力学计算业务拆分：先算完姿态的所有，再从加速度开始算起质心运动
+    def calc_w_dot_body_frame(self, M_b_, w_b_):
         # 旋转运动角加速度方程
-        self.Gyroscopic_moment_b_ = - np.cross(omega_b_, 
-                            left_mutiple(self.I_b, omega_b_))
-        omega_b_dot_ = left_mutiple(
+        self.Gyroscopic_moment_b_ = - np.cross(w_b_, 
+                            left_mutiple(self.I_b, w_b_))
+        w_b_dot_ = left_mutiple(
             self.I_inv, 
             M_b_ + self.Gyroscopic_moment_b_
             )
-        return v_b_dot_, omega_b_dot_
+        return w_b_dot_
+    def calc_acc_body_frame(self, F_b_, v_b_, w_b_):
+        # 体轴系质心动力学方程
+        v_b_dot_ = np.cross(v_b_, w_b_) + F_b_/self.m
+        return v_b_dot_
     
-    # 在体轴系计算加速度的状态更新
-    def move1(self, F_b_, M_b_, dt):
-        # 速度和角速度变换到体轴系
-        v_b_ = left_mutiple(self.R_i2b, self.v_)
-        omega_b_ = left_mutiple(self.R_i2b, self.omega_)
+    # 在体轴系计算加速度的状态更新，失败的做法，体轴只能算动力学，运动学只有在惯性系计算才不会有显著的误差累积
+    def move_calc_in_b(self, F_b_, M_b_, dt):
+        # 非惯性系先算旋转，再算平移
+        w_b_ = left_mutiple(self.R_i2b, self.w_)
+        w_b_dot_ = self.calc_w_dot_body_frame(M_b_, w_b_)
 
-        # 体轴系动力学解算
-        v_b_dot_, omega_b_dot_ = self.calc_acc_body_frame(F_b_, M_b_, v_b_, omega_b_)
-        
-        # 在体轴系更新速度与角速度
-        # 线运动
-        v_b_next_ = v_b_ + v_b_dot_ * dt # 欧拉积分1
-        # v_b_next_ = v_b_ + (v_b_dot_+self.v_dot_last_)/2 * dt # 梯形积分1
-        # self.v_dot_last_ = v_b_dot_
-        # 大小计算，防止被向心力加速
-        if norm(v_b_) > 1e-3:
-            v_b_dot_mag = np.dot(v_b_dot_, v_b_)/(norm(v_b_)+1e-8)
-            v_b_next_ = v_b_next_ / (norm(v_b_next_)+1e-8) * (norm(v_b_) + v_b_dot_mag * dt)
+        # # 无处安放的旋转系质点动力学
+        # v_b_ = left_mutiple(self.R_i2b, self.v_)
+        # w_b_ = left_mutiple(self.R_i2b, self.w_)
+        # v_b_dot_ = self.calc_acc_body_frame(F_b_, v_b_, w_b_)
 
         # 角运动
-        omega_b_next_ = omega_b_ + omega_b_dot_ * dt # 欧拉积分2
-        # omega_b_next_ = omega_b_ + (omega_b_dot_+self.omega_dot_last_)/2 * dt # 梯形积分2
-        # self.omega_dot_last_ = omega_b_dot_
-        if norm(omega_b_) > 1e-3:
-            omega_b_dot_mag = np.dot(omega_b_dot_, omega_b_)/(norm(omega_b_)+1e-8)
-            omega_b_next_ = omega_b_next_ / (norm(omega_b_next_)+1e-8) * (norm(omega_b_) + omega_b_dot_mag * dt)
+        w_b_next_ = w_b_ + w_b_dot_ * dt # 欧拉积分2
+        # w_b_next_ = w_b_ + (w_b_dot_+self.w_dot_last_)/2 * dt # （旋转惯性系下不要用）梯形积分2
+        # self.w_dot_last_ = w_b_dot_
+        if norm(w_b_) > 1e-3:
+            w_b_dot_mag = np.dot(w_b_dot_, w_b_)/(norm(w_b_)+1e-8)
+            w_b_next_ = w_b_next_ / (norm(w_b_next_)+1e-8) * (norm(w_b_) + w_b_dot_mag * dt)
+
+
+        # 无处安放的旋转系质点动力学
+        v_b_ = left_mutiple(self.R_i2b, self.v_)
+        v_b_dot_ = self.calc_acc_body_frame(F_b_, v_b_, w_b_next_)
+
 
         # 【极其关键的修复】：必须先更新姿态，再把体轴系的速度转回惯性系
-        quat_dot = QuatDerivative(self.quat, omega_b_next_)
+        quat_dot = QuatDerivative(self.quat, w_b_next_)
         quat_next = self.quat + quat_dot * dt
         # 更新旋转矩阵和旋转四元数
         self.quat = quat_next / norm(quat_next)
@@ -211,44 +242,54 @@ class FlyingObject:
         self.xb_ = self.R_i2b[0,:]
         self.yb_ = self.R_i2b[1,:]
         self.zb_ = self.R_i2b[2,:]
+        self.w_ = left_mutiple(self.R_i2b.T, w_b_next_)
 
-        # 然后再用【全新】的旋转矩阵，把体轴系速度转回惯性系
+        # 在体轴系更新速度与角速度
+        # 线运动
+        v_b_next_ = v_b_ + v_b_dot_ * dt # 欧拉积分1
+        # v_b_next_ = v_b_ + (v_b_dot_+self.v_dot_last_)/2 * dt # （旋转惯性系下不要用）梯形积分1
+        # self.v_dot_last_ = v_b_dot_
+        # 大小计算，防止被向心力加速
+        if norm(v_b_) > 1e-3:
+            v_b_dot_mag = np.dot(v_b_dot_, v_b_)/(norm(v_b_)+1e-8)
+            v_b_next_ = v_b_next_ / (norm(v_b_next_)+1e-8) * (norm(v_b_) + v_b_dot_mag * dt)
+        
+        # 回到惯性系更新位置
         self.v_ = left_mutiple(self.R_i2b.T, v_b_next_)
-        self.omega_ = left_mutiple(self.R_i2b.T, omega_b_next_)
 
         self.p_ += self.v_ * dt # 欧拉积分3
-        # self.p_ += (self.v_ + self.v_last_)/2 * dt # 叠两层梯形积分就是辛普森积分3
+        # self.p_ += (self.v_ + self.v_last_)/2 * dt # 叠两层（旋转惯性系下不要用）梯形积分就是辛普森积分3
         # self.v_last_ = self.v_
 
-    def calc_acc_inert_frame(self, F_i_, M_i_, v_i_, omega_i_):
+    def calc_acc_inert_frame(self, F_i_, M_i_, v_i_, w_i_):
         # I_inertial = R.T * I_body * R
         I_i = self.R_i2b.T @ self.I_b @ self.R_i2b
         # 惯性系质心动力学方程
         v_i_dot_ = F_i_ / self.m
         # 惯性系角加速度方程
-        self.Gyroscopic_moment_i_ =  - np.cross(omega_i_,
-                                left_mutiple(I_i, omega_i_))
-        omega_i_dot_ = left_mutiple(
+        self.Gyroscopic_moment_i_ =  - np.cross(w_i_,
+                                left_mutiple(I_i, w_i_))
+        w_i_dot_ = left_mutiple(
             inv(I_i),
             M_i_ + self.Gyroscopic_moment_i_
             )
-        return v_i_dot_, omega_i_dot_
+        return v_i_dot_, w_i_dot_
 
-    # 在惯性系计算加速度的状态更新
-    def move2(self, F_b_, M_b_, dt):
+    # 在惯性系计算加速度的状态更新，运动学只有在惯性系计算才不会有显著的误差累积
+    def move(self, F_b_, M_b_, dt):
         # 力和力矩、惯性张量变换到惯性系
         F_i_= left_mutiple(self.R_i2b.T, F_b_)
         M_i_ = left_mutiple(self.R_i2b.T, M_b_)
         v_i_ = self.v_
-        omega_i_ = self.omega_
+        w_i_ = self.w_
 
         # 惯性系动力学解算
-        v_i_dot_, omega_i_dot_ = self.calc_acc_inert_frame(F_i_, M_i_, v_i_, omega_i_)
+        v_i_dot_, w_i_dot_ = self.calc_acc_inert_frame(F_i_, M_i_, v_i_, w_i_)
 
         # 在惯性系更新速度与角速度
         # 线运动
         v_i_next_ = self.v_ + v_i_dot_ * dt # 欧拉积分1
-        # v_i_next_ = self.v_ + (v_i_dot_ + self.v_dot_last_)/2 * dt # 梯形积分1
+        # v_i_next_ = self.v_ + (v_i_dot_ + self.v_dot_last_)/2 * dt # （旋转惯性系下不要用）梯形积分1
         # self.v_dot_last_ = v_i_dot_
         if norm(v_i_) > 1e-3:
             v_i_dot_mag = np.dot(v_i_dot_, v_i_)/(norm(v_i_)+1e-8)
@@ -256,25 +297,25 @@ class FlyingObject:
             v_i_next_ = v_i_next_/(norm(v_i_next_) + 1e-8) * v_i
 
         # 角运动
-        omega_i_next_ = omega_i_ + omega_i_dot_ * dt # 欧拉积分2
-        # omega_i_next_ = omega_i_ + (omega_i_dot_ + self.omega_dot_last_)/2 * dt # 梯形积分2
-        # self.omega_dot_last_ = omega_i_dot_
-        if norm(omega_i_) > 1e-3:
-            omega_i_dot_mag = np.dot(omega_i_dot_, omega_i_)/(norm(omega_i_)+1e-8)
-            omega_i = norm(omega_i_) + omega_i_dot_mag * dt
-            omega_i_next_ = omega_i_next_ / (norm(omega_i_next_)+1e-8) * omega_i
+        w_i_next_ = w_i_ + w_i_dot_ * dt # 欧拉积分2
+        # w_i_next_ = w_i_ + (w_i_dot_ + self.w_dot_last_)/2 * dt # （旋转惯性系下不要用）梯形积分2
+        # self.w_dot_last_ = w_i_dot_
+        if norm(w_i_) > 1e-3:
+            w_i_dot_mag = np.dot(w_i_dot_, w_i_)/(norm(w_i_)+1e-8)
+            w_i = norm(w_i_) + w_i_dot_mag * dt
+            w_i_next_ = w_i_next_ / (norm(w_i_next_)+1e-8) * w_i
 
         # 更新角速度和速度
         self.v_ = v_i_next_
-        self.omega_ = omega_i_next_
+        self.w_ = w_i_next_
 
         # 在惯性系更新位置和姿态
         self.p_ += self.v_ * dt # 欧拉积分3
-        # self.p_ += (self.v_+self.v_last_)/2 * dt  # 叠两层梯形积分就是辛普森积分3
+        # self.p_ += (self.v_+self.v_last_)/2 * dt  # 叠两层（旋转惯性系下不要用）梯形积分就是辛普森积分3
         # self.v_last_ = self.v_
-        if norm(self.omega_) > 1e-8:
-            axis_ = self.omega_ / norm(self.omega_)
-            alpha = norm(self.omega_) * dt
+        if norm(self.w_) > 1e-8:
+            axis_ = self.w_ / norm(self.w_)
+            alpha = norm(self.w_) * dt
             self.xb_ = RodRot(self.xb_, axis_, alpha)
             self.yb_ = RodRot(self.yb_, axis_, alpha)
             self.zb_ = RodRot(self.zb_, axis_, alpha)
@@ -324,8 +365,8 @@ if __name__ == '__main__':
     hist1, hist2 = [], []
 
     for i in range(steps):
-        obj1.move1(Fb, Mb, dt)
-        obj2.move2(Fb, Mb, dt)
+        obj1.move_calc_in_b(Fb, Mb, dt)
+        obj2.move(Fb, Mb, dt)
         hist1.append({'p': obj1.p_.copy(), 'x': obj1.xb_.copy(), 'y':obj1.yb_.copy(), 'z':obj1.zb_.copy()})
         hist2.append({'p': obj2.p_.copy(), 'x': obj2.xb_.copy(), 'y':obj2.yb_.copy(), 'z':obj2.zb_.copy()})
 
