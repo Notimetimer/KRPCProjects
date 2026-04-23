@@ -276,7 +276,21 @@ class FlyingObject:
 
 # --- 仿真与绘图 ---
 if __name__ == '__main__':
-    m, I_mat = 10, np.diag([1, 1.5, 2])
+    m = 10
+    # 1. 先定义惯性主轴上的惯性矩 (必须满足三角不等式，例如 1+1.5 > 2)
+    I_principal = np.diag([1.0, 1.5, 2.0])
+    # 2. 定义一个旋转矩阵 (表示体轴相对于惯性主轴偏转了多少)
+    # 比如绕 Y 轴偏转 10 度
+    phi1 = np.radians(0)
+    theta1 = np.radians(0)
+    psi1 = np.radians(0)
+
+    R = RotMat_zyx(phi1, theta1, psi1)
+    # 3. 计算体轴系下的非对角惯性张量
+    # 公式: I_body = R * I_principal * R.T
+    I_mat = R @ I_principal @ R.T
+    print("非对角惯性矩阵:\n", I_mat)
+
     obj1, obj2 = FlyingObject(m, I_mat), FlyingObject(m, I_mat)
     
     p0, v0 = np.array([0,0,0]), np.array([0,0,0])
@@ -294,25 +308,47 @@ if __name__ == '__main__':
     for i in range(steps):
         obj1.move1(Fb, Mb, dt)
         obj2.move2(Fb, Mb, dt)
-        hist1.append({'p': obj1.p_.copy(), 'x': obj1.xb_.copy()})
-        hist2.append({'p': obj2.p_.copy(), 'x': obj2.xb_.copy()})
+        hist1.append({'p': obj1.p_.copy(), 'x': obj1.xb_.copy(), 'y':obj1.yb_.copy(), 'z':obj1.zb_.copy()})
+        hist2.append({'p': obj2.p_.copy(), 'x': obj2.xb_.copy(), 'y':obj2.yb_.copy(), 'z':obj2.zb_.copy()})
 
     # 数据转换
     p1 = np.array([h['p'] for h in hist1])
     x1 = np.array([h['x'] for h in hist1])
+    y1 = np.array([h['y'] for h in hist1])
+    z1 = np.array([h['z'] for h in hist1])
     p2 = np.array([h['p'] for h in hist2])
     x2 = np.array([h['x'] for h in hist2])
+    y2 = np.array([h['y'] for h in hist2])
+    z2 = np.array([h['z'] for h in hist2])
 
     print(f"Final Position Error: {norm(p1[-1] - p2[-1]):.6e}")
     print(f"Final Attitude Vector Error: {norm(x1[-1] - x2[-1]):.6e}")
 
     fig1 = plt.figure(figsize=(14, 6))
-    fig1.suptitle("Attitude Rotation: Body X-axis Tip Trajectory", fontsize=14)
-    for i, (data, title) in enumerate([(x1, "Move 1 (Body Frame)"), (x2, "Move 2 (Inertial Frame)")]):
+    fig1.suptitle("Attitude Rotation: Body Axes Tip Trajectories", fontsize=14)
+    
+    # 建立一个列表方便循环对比
+    datasets = [
+        (x1, y1, z1, "Move 1 (Body Frame)"),
+        (x2, y2, z2, "Move 2 (Inertial Frame)")
+    ]
+
+    for i, (dx, dy, dz, title) in enumerate(datasets):
         ax = fig1.add_subplot(1, 2, i+1, projection='3d')
-        ax.plot(data[:, 0], data[:, 1], data[:, 2], 'r', label='X-axis Trace')
-        ax.quiver(0,0,0, data[-1,0], data[-1,1], data[-1,2], color='b', length=1.2, normalize=True)
-        ax.set_title(title); ax.set_xlim([-1, 1]); ax.set_ylim([-1, 1]); ax.set_zlim([-1, 1])
+        # 绘制三轴轨迹
+        ax.plot(dx[:, 0], dx[:, 1], dx[:, 2], 'r', alpha=0.6, label='X-axis Trace')
+        ax.plot(dy[:, 0], dy[:, 1], dy[:, 2], 'g', alpha=0.6, label='Y-axis Trace')
+        ax.plot(dz[:, 0], dz[:, 1], dz[:, 2], 'b', alpha=0.6, label='Z-axis Trace')
+        
+        # 绘制当前轴向矢量 (取最后一帧)
+        ax.quiver(0, 0, 0, dx[-1,0], dx[-1,1], dx[-1,2], color='r', length=1.0, normalize=True)
+        ax.quiver(0, 0, 0, dy[-1,0], dy[-1,1], dy[-1,2], color='g', length=1.0, normalize=True)
+        ax.quiver(0, 0, 0, dz[-1,0], dz[-1,1], dz[-1,2], color='b', length=1.0, normalize=True)
+        
+        ax.set_title(title)
+        ax.set_xlim([-1.2, 1.2]); ax.set_ylim([-1.2, 1.2]); ax.set_zlim([-1.2, 1.2])
+        ax.set_xlabel('X'); ax.set_ylabel('Y'); ax.set_zlabel('Z')
+        if i == 0: ax.legend(fontsize='small')
 
     fig2 = plt.figure(figsize=(14, 6))
     fig2.suptitle("Translation: Center of Mass Trajectory", fontsize=14)

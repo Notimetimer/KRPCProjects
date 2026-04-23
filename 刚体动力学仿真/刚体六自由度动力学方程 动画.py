@@ -276,17 +276,31 @@ class FlyingObject:
 
 # --- 仿真与绘图 ---
 if __name__ == '__main__':
-    m, I_mat = 10, np.diag([1, 1.5, 2])
+    m = 10
+    # 1. 先定义惯性主轴上的惯性矩 (必须满足三角不等式，例如 1+1.5 > 2)
+    I_principal = np.diag([1.0, 1.5, 2.0])
+    # 2. 定义一个旋转矩阵 (表示体轴相对于惯性主轴偏转了多少)
+    # 比如绕 Y 轴偏转 10 度
+    phi1 = np.radians(1)
+    theta1 = np.radians(1)
+    psi1 = np.radians(1)
+
+    R = RotMat_zyx(phi1, theta1, psi1)
+    # 3. 计算体轴系下的非对角惯性张量
+    # 公式: I_body = R * I_principal * R.T
+    I_mat = R @ I_principal @ R.T
+    print("非对角惯性矩阵:\n", I_mat)
+
     obj1, obj2 = FlyingObject(m, I_mat), FlyingObject(m, I_mat)
     
     p0, v0 = np.array([0,0,0]), np.array([0,0,0])
-    q0, w0 = np.array([1,0,0,0]), np.array([0,0,0])
+    q0, w0 = np.array([1,0,0,0]), np.array([0.01,8,0.01])
     
     obj1.reset(p0, v0, q0, w0)
     obj2.reset(p0, v0, q0, w0)
     
-    Fb = np.array([5, 2, 0]) 
-    Mb = np.array([0.2, 0.5, 1.0]) 
+    Fb = np.array([0, 0, 0]) 
+    Mb = np.array([0.0, 0.0, 0.0]) 
     
     dt, steps = 0.01, 1000
     hist1, hist2 = [], []
@@ -294,32 +308,92 @@ if __name__ == '__main__':
     for i in range(steps):
         obj1.move1(Fb, Mb, dt)
         obj2.move2(Fb, Mb, dt)
-        hist1.append({'p': obj1.p_.copy(), 'x': obj1.xb_.copy()})
-        hist2.append({'p': obj2.p_.copy(), 'x': obj2.xb_.copy()})
+        hist1.append({'p': obj1.p_.copy(), 'x': obj1.xb_.copy(), 'y':obj1.yb_.copy(), 'z':obj1.zb_.copy()})
+        hist2.append({'p': obj2.p_.copy(), 'x': obj2.xb_.copy(), 'y':obj2.yb_.copy(), 'z':obj2.zb_.copy()})
 
     # 数据转换
     p1 = np.array([h['p'] for h in hist1])
     x1 = np.array([h['x'] for h in hist1])
+    y1 = np.array([h['y'] for h in hist1])
+    z1 = np.array([h['z'] for h in hist1])
     p2 = np.array([h['p'] for h in hist2])
     x2 = np.array([h['x'] for h in hist2])
+    y2 = np.array([h['y'] for h in hist2])
+    z2 = np.array([h['z'] for h in hist2])
 
     print(f"Final Position Error: {norm(p1[-1] - p2[-1]):.6e}")
     print(f"Final Attitude Vector Error: {norm(x1[-1] - x2[-1]):.6e}")
 
-    fig1 = plt.figure(figsize=(14, 6))
-    fig1.suptitle("Attitude Rotation: Body X-axis Tip Trajectory", fontsize=14)
-    for i, (data, title) in enumerate([(x1, "Move 1 (Body Frame)"), (x2, "Move 2 (Inertial Frame)")]):
-        ax = fig1.add_subplot(1, 2, i+1, projection='3d')
-        ax.plot(data[:, 0], data[:, 1], data[:, 2], 'r', label='X-axis Trace')
-        ax.quiver(0,0,0, data[-1,0], data[-1,1], data[-1,2], color='b', length=1.2, normalize=True)
-        ax.set_title(title); ax.set_xlim([-1, 1]); ax.set_ylim([-1, 1]); ax.set_zlim([-1, 1])
+    # --- 同步动画与绘图 (4个子图同步对比) ---
+    from matplotlib.animation import FuncAnimation
 
-    fig2 = plt.figure(figsize=(14, 6))
-    fig2.suptitle("Translation: Center of Mass Trajectory", fontsize=14)
-    for i, (data, title) in enumerate([(p1, "Move 1 (Body Frame)"), (p2, "Move 2 (Inertial Frame)")]):
-        ax = fig2.add_subplot(1, 2, i+1, projection='3d')
-        ax.plot(data[:, 0], data[:, 1], data[:, 2], 'g', linewidth=2)
-        ax.scatter(*data[-1], color='r')
-        ax.set_title(title)
+    fig = plt.figure(figsize=(15, 10))
+    fig.suptitle("6-DOF Dynamics Sync Animation: Move 1 (Body) vs Move 2 (Inertial)", fontsize=16)
 
+    # 创建4个子图 (2x2 布局)
+    ax_att1 = fig.add_subplot(2, 2, 1, projection='3d')
+    ax_att2 = fig.add_subplot(2, 2, 2, projection='3d')
+    ax_pos1 = fig.add_subplot(2, 2, 3, projection='3d')
+    ax_pos2 = fig.add_subplot(2, 2, 4, projection='3d')
+
+    # --- 初始化绘图对象 ---
+    # 姿态 1 & 2 的轨迹和轴矢量
+    lines_att1 = [ax_att1.plot([], [], [], color, alpha=0.3)[0] for color in ['r', 'g', 'b']]
+    vecs_att1  = [ax_att1.plot([], [], [], color, linewidth=2)[0] for color in ['r', 'g', 'b']]
+    lines_att2 = [ax_att2.plot([], [], [], color, alpha=0.3)[0] for color in ['r', 'g', 'b']]
+    vecs_att2  = [ax_att2.plot([], [], [], color, linewidth=2)[0] for color in ['r', 'g', 'b']]
+    
+    # 位置 1 & 2 的轨迹和点
+    line_p1,  = ax_pos1.plot([], [], [], 'k-', linewidth=1.5, label='Traj 1')
+    point_p1, = ax_pos1.plot([], [], [], 'ro')
+    line_p2,  = ax_pos2.plot([], [], [], 'k-', linewidth=1.5, label='Traj 2')
+    point_p2, = ax_pos2.plot([], [], [], 'bo')
+
+    def init():
+        # 姿态子图设置
+        for ax, title in [(ax_att1, "Attitude (Move 1)"), (ax_att2, "Attitude (Move 2)")]:
+            ax.set_xlim([-1.2, 1.2]); ax.set_ylim([-1.2, 1.2]); ax.set_zlim([-1.2, 1.2])
+            ax.set_title(title); ax.set_xlabel('X'); ax.set_ylabel('Y')
+
+        # 位置子图设置 (自动缩放)
+        margin = 2
+        all_p = np.vstack([p1, p2])
+        p_min, p_max = all_p.min(axis=0), all_p.max(axis=0)
+        for ax, title in [(ax_pos1, "Position (Move 1)"), (ax_pos2, "Position (Move 2)")]:
+            ax.set_xlim([p_min[0]-margin, p_max[0]+margin])
+            ax.set_ylim([p_min[1]-margin, p_max[1]+margin])
+            ax.set_zlim([p_min[2]-margin, p_max[2]+margin])
+            ax.set_title(title); ax.set_xlabel('X (m)'); ax.set_ylabel('Y (m)')
+        
+        return (*lines_att1, *vecs_att1, *lines_att2, *vecs_att2, line_p1, point_p1, line_p2, point_p2)
+
+    def update(frame):
+        idx = min(frame * 5, steps - 1) # 5倍速播放
+        
+        # 数据组
+        att1_data = [x1, y1, z1]
+        att2_data = [x2, y2, z2]
+        
+        # 更新姿态 1
+        for i, data in enumerate(att1_data):
+            lines_att1[i].set_data(data[:idx, 0], data[:idx, 1]); lines_att1[i].set_3d_properties(data[:idx, 2])
+            vecs_att1[i].set_data([0, data[idx, 0]], [0, data[idx, 1]]); vecs_att1[i].set_3d_properties([0, data[idx, 2]])
+        
+        # 更新姿态 2
+        for i, data in enumerate(att2_data):
+            lines_att2[i].set_data(data[:idx, 0], data[:idx, 1]); lines_att2[i].set_3d_properties(data[:idx, 2])
+            vecs_att2[i].set_data([0, data[idx, 0]], [0, data[idx, 1]]); vecs_att2[i].set_3d_properties([0, data[idx, 2]])
+
+        # 更新位置
+        line_p1.set_data(p1[:idx, 0], p1[:idx, 1]); line_p1.set_3d_properties(p1[:idx, 2])
+        point_p1.set_data([p1[idx, 0]], [p1[idx, 1]]); point_p1.set_3d_properties([p1[idx, 2]])
+        line_p2.set_data(p2[:idx, 0], p2[:idx, 1]); line_p2.set_3d_properties(p2[:idx, 2])
+        point_p2.set_data([p2[idx, 0]], [p2[idx, 1]]); point_p2.set_3d_properties([p2[idx, 2]])
+
+        return (*lines_att1, *vecs_att1, *lines_att2, *vecs_att2, line_p1, point_p1, line_p2, point_p2)
+
+    ani = FuncAnimation(fig, update, frames=steps//5, init_func=init, blit=True, interval=20, 
+                        repeat=False) # repeat表示循环播放
+
+    plt.tight_layout()
     plt.show()
