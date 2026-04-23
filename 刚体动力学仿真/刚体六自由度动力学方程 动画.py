@@ -338,9 +338,14 @@ if __name__ == '__main__':
     x2 = np.array([h['x'] for h in hist2])
     y2 = np.array([h['y'] for h in hist2])
     z2 = np.array([h['z'] for h in hist2])
+    p_e = np.array([norm(pt) for pt in (p1-p2)])
+    x_e = np.array([norm(xt) for xt in (x1-x2)])
 
-    print(f"Avg Position Error: {norm(p1[-1] - p2[-1])/steps:.6e}")
-    print(f"Avg Attitude Vector Error: {norm(x1[-1] - x2[-1])/steps:.6e}")
+    print(f"Avg Position Error: {norm(p_e)/steps:.6e}")
+    print(f"Avg Attitude Vector Error: {norm(x_e)/steps:.6e}")
+
+    print(f"Final Position Error: {norm(p1[-1] - p2[-1]):.6e}")
+    print(f"Final Attitude Vector Error: {norm(x1[-1] - x2[-1]):.6e}")
 
     # --- 同步动画与绘图 (4个子图同步对比) ---
     from matplotlib.animation import FuncAnimation
