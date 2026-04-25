@@ -44,7 +44,7 @@ for i, engine in enumerate(engines):
     # 获取引擎部件在体轴系中的位置（相对于质心）  
     position = engine.part.position(vessel.reference_frame)
     engines_dict[i] = RFD2FRD(engine.part.position(vessel.reference_frame))
-    engines_dict[i][0] = 0 # 忽视前后分量
+    engines_dict[i][2] = 0 # 忽视上下分量
     engines_dict[i] /= (norm(engines_dict[i]) + 1e-6) # 坐标归一化
     print(f"{i}: ({position[0]:.2f}, {position[1]:.2f}, {position[2]:.2f}) - {engine.part.title}")
 
@@ -58,21 +58,21 @@ while True:
     
     # 获取姿态控制量 (-1.0 - 1.0)  
     pitch_cmd = control.pitch    # 俯仰 (w/s键)  
-    yaw_cmd = control.yaw        # 偏航 (a/d键)    
+    # yaw_cmd = control.yaw        # 偏航 (a/d键)    
     roll_cmd = control.roll      # 滚转 (q/e键)
 
     # 油门补偿量
     for i, engine in enumerate(engines):
         engine.independent_throttle = True
-        pitch_add_up = np.dot(z_b_in_b_, engines_dict[i])
-        yaw_add_up = np.dot(-y_b_in_b_, engines_dict[i])
+        pitch_add_up = np.dot(x_b_in_b_, engines_dict[i])
+        roll_add_up = np.dot(-y_b_in_b_, engines_dict[i])
         engine.throttle = throttle_cmd + \
             k_pitch_yaw * (
                 pitch_add_up * pitch_cmd +
-                 yaw_add_up * yaw_cmd)
+                 roll_add_up * roll_cmd)
 
-    # 舵机控制
-    for rotation in rotations:  
-        rotation.target_angle = 10 * roll_cmd
+    # # 舵机控制
+    # for rotation in rotations:  
+    #     rotation.target_angle = 10 * yaw_cmd
 
     time.sleep(dt)
