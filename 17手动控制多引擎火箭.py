@@ -39,14 +39,21 @@ def RFD2FRD(input_vector):
     return output_vector
 
 engines_dict = {}
-# 获取部件位置
+engines_Mb = {}
+# 获取部件位置和推力方向
 for i, engine in enumerate(engines):  
     # 获取引擎部件在体轴系中的位置（相对于质心）  
-    position = engine.part.position(vessel.reference_frame)
+    position = RFD2FRD(engine.part.position(vessel.reference_frame))
     engines_dict[i] = RFD2FRD(engine.part.position(vessel.reference_frame))
     engines_dict[i][0] = 0 # 忽视前后分量
     engines_dict[i] /= (norm(engines_dict[i]) + 1e-6) # 坐标归一化
     print(f"{i}: ({position[0]:.2f}, {position[1]:.2f}, {position[2]:.2f}) - {engine.part.title}")
+    # 获取推力方向（相对与体轴，但是左手系）
+    direction = engine.thrusters[0].thrust_direction(vessel.reference_frame)
+    F_direction = RFD2FRD(direction)
+    F_direction /= (norm(F_direction)+1e-8)
+    print(F_direction)
+    engines_Mb[i] = np.cross(position/(norm(position)+1e-8), F_direction)
 
 x_b_in_b_ = np.array([1,0,0]) # 前
 y_b_in_b_ = np.array([0,1,0]) # 右
@@ -64,8 +71,10 @@ while True:
     # 油门补偿量
     for i, engine in enumerate(engines):
         engine.independent_throttle = True
-        pitch_add_up = np.dot(z_b_in_b_, engines_dict[i])
-        yaw_add_up = np.dot(-y_b_in_b_, engines_dict[i])
+        pitch_add_up = np.dot(y_b_in_b_, engines_Mb[i])
+        yaw_add_up = np.dot(z_b_in_b_, engines_Mb[i])
+        # pitch_add_up = np.dot(z_b_in_b_, engines_dict[i])
+        # yaw_add_up = np.dot(-y_b_in_b_, engines_dict[i])
         engine.throttle = throttle_cmd + \
             k_pitch_yaw * (
                 pitch_add_up * pitch_cmd +
