@@ -68,29 +68,24 @@ class rocket_control(object):
         self.control = vessel.control
         self.flight_surface = self.vessel.flight(self.surface_frame)
 
-        # 水平减速参数
-        # 下降姿态环
-        self.pointing_pid = PositionPID(max=0.4, min=0, p=0.12, i=0, d=0.09) # max=0.3, min=0, p=0.1, i=0, d=0.07
-        # 减摇姿态环
-        self.stable_pointing_pid = PositionPID(max=0.3, min=0, p=0.1, i=0, d=0.07)
-        # 快速姿态环
-        self.fast_pointing_pid = PositionPID(max=1.0, min=0, p=1.0, i=0, d=0.7)
+        p_turn = 4.0
+        i_turn = 0.0
+        d_turn = 1.4 # 1.4
 
-        # 水平一阶惯性环节
-        self.hor_speed_inertial = FirstOrderIneritialElement(rate=5)
+        # 水平减速参数
+        # 姿态环
+        self.pointing_pid = PositionPID(max=1, min=-1, p=p_turn, i=i_turn, d=d_turn)
 
         # 水平加速度环
         self.hor_acc_pid = PositionPID(max=2.0, min=0, p=2.0, i=0.0, d=2.0) # p=0.2, i=0.001, d=0.14
         # 水平速度环
-        self.hor_speed_pid = PositionPID(max=5.0, min=0, p=5.0, i=0*0.001, d=5.0) # p=0.2, i=0.001, d=0.14
+        self.hor_speed_pid = PositionPID(max=5.0, min=0, p=10.0, i=0*0.001, d=5.0) # p=0.2, i=0.001, d=0.14
 
-        p_turn = 2.0
-        i_turn = 0.0
-        d_turn = 1.6 # 1.4
-        self.yaw_pid = PositionPID(max=1, min=-1, p=p_turn, i=i_turn, d=d_turn)
-        self.pitch_pid = PositionPID(max=1, min=-1, p=p_turn, i=i_turn, d=d_turn)
-        self.roll_pid = PositionPID(max=1, min=-1, p=p_turn/70, i=i_turn, d=0)
-        self.height_controller = PositionPID(max=1, min=0, p=0.1, i=0, d=0.07)
+
+        self.yaw_pid = copy.deepcopy(self.pointing_pid)
+        self.pitch_pid = copy.deepcopy(self.pointing_pid)
+        self.roll_pid = PositionPID(max=1, min=-1, p=p_turn/50, i=i_turn, d=0)
+        self.height_controller = PositionPID(max=1, min=0, p=0.01, i=0, d=0.007)
 
         # 体轴基本方向  
         self.body_axes = {  
@@ -380,7 +375,6 @@ class rocket_control(object):
                                 target_N_speed = 0.0,
                                 target_E_speed = 0.0,
                                 dt=0.05,
-                                type="simple",
                                 ):
         # 读取观测数据
         self.get_state_of_NUE()
@@ -409,49 +403,31 @@ class rocket_control(object):
         v_error_vec = np.array([v_N_error, 0.0, v_E_error])
         v_hor_error_mag = np.linalg.norm(v_error_vec)
 
-        if type == "simple":
-            "无加速度环期望姿态"
-            if v_hor_error_mag < 5.0:
-                # 需要更为平稳
-                target_point_ = target_point0_ + self.stable_pointing_pid.calculate(v_hor_error_mag, dt=dt) \
-                    * v_error_vec / (v_hor_error_mag + 1e-5)
-            else:
-                # 需要快速
-                target_point_ = target_point0_ + \
-                    min(max_tan_lean_allowed, self.fast_pointing_pid.calculate(v_hor_error_mag, dt=dt)) \
-                    * v_error_vec / (v_hor_error_mag + 1e-5)
-        else:
-            # 加速度环失败的等效
-            # temp =  self.hor_speed_pid.calculate(v_hor_error, dt=dt)
-            # temp = self.hor_speed_inertial.calculate(temp, dt=dt) # 一阶惯性环节
-            # target_point_ = target_point0_ - temp \
-            #         * np.array([v_N_error, 0.0, v_E_error])/(v_hor_error+1e-5)
-
-            "带加速度环期望姿态"
-            # 计算当前水平加速度分量
-            a_N = self.current_twr * self.g * thrust_direction_[0]
-            a_E = self.current_twr * self.g * thrust_direction_[2]
-            
-            # 期望加速度 (规范化：由速度误差计算目标加速度)
-            # v_error_vec 是目标减当前，所以 pid 计算出的就是目标加速度方向
-            target_a_hor_mag = self.hor_speed_pid.calculate(v_hor_error_mag, dt=dt)
-            target_N_a = target_a_hor_mag * v_N_error / (v_hor_error_mag + 1e-5)
-            target_E_a = target_a_hor_mag * v_E_error / (v_hor_error_mag + 1e-5)
-            
-            # 加速度环误差 (规范化：目标 - 当前)
-            a_N_error = target_N_a - a_N
-            a_E_error = target_E_a - a_E
-            a_error_vec = np.array([a_N_error, 0.0, a_E_error])
-            a_hor_error_mag = np.linalg.norm(a_error_vec)
-            
-            # 期望指向计算 (规范化：利用加速度误差直接补偿指向)
-            target_point_hor_ = self.hor_acc_pid.calculate(a_hor_error_mag, dt=dt) * \
-                a_error_vec / (a_hor_error_mag + 1e-5)
-            
-            # 最终指向 = 默认向上 + 指向修正
-            target_point_ = target_point0_ + target_point_hor_ * \
-                min(max_tan_lean_allowed, self.pointing_pid.calculate(v_hor_error_mag, dt=dt) * norm(target_point_hor_)) / \
-                (norm(target_point_hor_) + 1e-5)
+        "带加速度环期望姿态"
+        # 计算当前水平加速度分量
+        a_N = self.current_twr * self.g * thrust_direction_[0]
+        a_E = self.current_twr * self.g * thrust_direction_[2]
+        
+        # 期望加速度 (规范化：由速度误差计算目标加速度)
+        # v_error_vec 是目标减当前，所以 pid 计算出的就是目标加速度方向
+        target_a_hor_mag = self.hor_speed_pid.calculate(v_hor_error_mag, dt=dt)
+        target_N_a = target_a_hor_mag * v_N_error / (v_hor_error_mag + 1e-5)
+        target_E_a = target_a_hor_mag * v_E_error / (v_hor_error_mag + 1e-5)
+        
+        # 加速度环误差 (规范化：目标 - 当前)
+        a_N_error = target_N_a - a_N
+        a_E_error = target_E_a - a_E
+        a_error_vec = np.array([a_N_error, 0.0, a_E_error])
+        a_hor_error_mag = np.linalg.norm(a_error_vec)
+        
+        # 期望指向计算 (规范化：利用加速度误差直接补偿指向)
+        target_point_hor_ = self.hor_acc_pid.calculate(a_hor_error_mag, dt=dt) * \
+            a_error_vec / (a_hor_error_mag + 1e-5)
+        
+        # 最终指向 = 默认向上 + 指向修正
+        target_point_ = target_point0_ + target_point_hor_ * \
+            min(max_tan_lean_allowed, self.pointing_pid.calculate(v_hor_error_mag, dt=dt) * norm(target_point_hor_)) / \
+            (norm(target_point_hor_) + 1e-5)
 
         "姿态控制"    
         # 归一化
@@ -672,7 +648,7 @@ class RocketControlGUI:
                 
                 # 根据模式执行对应的控制逻辑
                 if mode == "HEIGHT":
-                    r.rocket_height_maintainence(target_height=h, target_N_speed=vn, target_E_speed=ve, dt=self.dt, type='not simple')
+                    r.rocket_height_maintainence(target_height=h, target_N_speed=vn, target_E_speed=ve, dt=self.dt)
                 elif mode == "LANDING":
                     r.fast_landing_controll(dt=self.dt)
                 elif mode == "CUT":

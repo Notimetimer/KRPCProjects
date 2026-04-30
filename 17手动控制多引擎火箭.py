@@ -75,10 +75,13 @@ while True:
         yaw_add_up = np.dot(z_b_in_b_, engines_Mb[i])
         # pitch_add_up = np.dot(z_b_in_b_, engines_dict[i])
         # yaw_add_up = np.dot(-y_b_in_b_, engines_dict[i])
-        engine.throttle = throttle_cmd + \
-            k_pitch_yaw * (
-                pitch_add_up * pitch_cmd +
-                 yaw_add_up * yaw_cmd)
+        if throttle_cmd > 0.001:
+            engine.throttle = throttle_cmd + \
+                k_pitch_yaw * (
+                    pitch_add_up * pitch_cmd +
+                    yaw_add_up * yaw_cmd)
+        else:
+            engine.throttle = 0
 
     # 舵机控制
     for rotation in rotations:  
