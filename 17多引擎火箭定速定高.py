@@ -77,15 +77,14 @@ class rocket_control(object):
         self.pointing_pid = PositionPID(max=1, min=-1, p=p_turn, i=i_turn, d=d_turn)
 
         # 水平加速度环
-        self.hor_acc_pid = PositionPID(max=2.0, min=0, p=2.0, i=0.0, d=2.0) # p=0.2, i=0.001, d=0.14
+        self.hor_acc_pid = PositionPID(max=20.0, min=0, p=20.0, i=0.0, d=2.0) # p=0.2, i=0.001, d=0.14
         # 水平速度环
-        self.hor_speed_pid = PositionPID(max=5.0, min=0, p=10.0, i=0*0.001, d=5.0) # p=0.2, i=0.001, d=0.14
-
+        self.hor_speed_pid = PositionPID(max=50.0, min=0, p=10.0, i=0*0.001, d=5.0) # p=0.2, i=0.001, d=0.14
 
         self.yaw_pid = copy.deepcopy(self.pointing_pid)
         self.pitch_pid = copy.deepcopy(self.pointing_pid)
-        self.roll_pid = PositionPID(max=1, min=-1, p=p_turn/50, i=i_turn, d=0)
-        self.height_controller = PositionPID(max=1, min=0, p=0.01, i=0, d=0.007)
+        self.roll_pid = PositionPID(max=1, min=-1, p=p_turn/50, i=i_turn, d=p_turn/50 * 0.3)
+        self.height_controller = PositionPID(max=1, min=0, p=0.03, i=0, d=0.025)
 
         # 体轴基本方向  
         self.body_axes = {  
@@ -241,15 +240,21 @@ class rocket_control(object):
             control.pitch = 0
             control.yaw = 0
             control.roll = 0
+            # 关闭所有引擎的独立油门控制  
+            for engine in self.vessel.parts.engines:  
+                engine.independent_throttle = False  
             return
         
         thrust_direction_ = self.bx_surf # 如果有安装角，需要用坐标变换从体轴系变到地表系
 
         # 启动最大推力高度
-        # 只考虑垂直速度
-        # h_max_thrust = (self.vertical_speed**2)/(2*self.g*(self.max_twr * (self.bx_surf[1]/(norm(self.bx_surf)+1e-3)) - 1)) * 1.2 # 安全高度倍率
-        # 用总速度估算 替换掉 sin(pitch)
-        h_max_thrust = (self.speed_surf**2)/(2*self.g*(self.max_twr * (thrust_direction_[1]/(norm(thrust_direction_)+1e-3)) - 1)+1e-5) * 1.3 # 安全高度倍率
+        # 速度矢量和指向的偏角
+        cos_AO = np.dot(self.velocity_surf, self.bx_surf)/(self.speed_surf+1e-3)
+        # 基于机械能估算
+        h_max_thrust = (1/2*self.speed_surf**2 + self.g * self.surface_altitude)/max(self.g * self.max_twr * - cos_AO , 1e-3) * 1.3
+        
+        # # 用总速度估算 替换掉 sin(pitch)
+        # h_max_thrust = (self.speed_surf**2)/(2*self.g*(self.max_twr * (thrust_direction_[1]/(norm(thrust_direction_)+1e-3)) - 1)+1e-5) * 1.3 # 安全高度倍率
 
         # 高于最大推力高度时， 优先控制姿态
         if self.surface_altitude > max(h_max_thrust, 50):
@@ -284,15 +289,16 @@ class rocket_control(object):
             # print("下降率", self.vertical_speed)
             # print("高度", self.surface_altitude)
 
-            # 速度过快，满推力减速
-            if abs(self.vertical_speed) > 10:
-                target_descend_speed = 100 # 制造饱和
-                # target_speed = 100 # 制造饱和
-            # 速度可接受，按高度指定下降速度
-            elif self.surface_altitude > 12:
-                target_descend_speed = -5 # np.clip(self.surface_altitude/100, 0, 1)*-10
-                # target_speed = 5
-            else:
+            # # 速度过快，满推力减速
+            # if abs(self.vertical_speed) > 10:
+            #     target_descend_speed = -10
+            # # 速度可接受，按高度指定下降速度
+            # elif self.surface_altitude > 12:
+            #     target_descend_speed = -5 # np.clip(self.surface_altitude/100, 0, 1)*-10
+            #     # target_speed = 5
+            # else:
+            target_descend_speed = -10
+            if self.surface_altitude < 12:
                 target_descend_speed = -2 # np.clip(self.surface_altitude/100, 0, 1)*-2
                 # target_speed = 2
 
@@ -424,10 +430,13 @@ class rocket_control(object):
         target_point_hor_ = self.hor_acc_pid.calculate(a_hor_error_mag, dt=dt) * \
             a_error_vec / (a_hor_error_mag + 1e-5)
         
-        # 最终指向 = 默认向上 + 指向修正
+        # 最终指向 = 默认向上 + 指向修正 啥啊这是？？？
         target_point_ = target_point0_ + target_point_hor_ * \
-            min(max_tan_lean_allowed, self.pointing_pid.calculate(v_hor_error_mag, dt=dt) * norm(target_point_hor_)) / \
-            (norm(target_point_hor_) + 1e-5)
+            min(max_tan_lean_allowed, self.pointing_pid.calculate(v_hor_error_mag, dt=dt) * \
+                norm(target_point_hor_)) / (norm(target_point_hor_) + 1e-5)
+        # target_point_ = target_point0_ + target_point_hor_ * \
+        #     min(max_tan_lean_allowed, self.pointing_pid.calculate(v_hor_error_mag, dt=dt) * norm(target_point_hor_)) / \
+        #     (norm(target_point_hor_) + 1e-5)
 
         "姿态控制"    
         # 归一化

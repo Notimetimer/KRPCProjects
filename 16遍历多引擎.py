@@ -38,6 +38,9 @@ for i, engine in enumerate(engines):
     time.sleep(1)  
       
     # 恢复原始状态  
+    # 关闭所有引擎的独立油门控制  
+    for engine in vessel.parts.engines:  
+        engine.independent_throttle = False  
     print("  恢复原始状态...")  
     engine.throttle = original_throttle  
     engine.thrust_limit = original_thrust_limit  
