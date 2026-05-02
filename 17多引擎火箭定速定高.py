@@ -16,6 +16,11 @@ import tkinter as tk
 from tkinter import ttk
 import threading
 
+import os, sys
+project_root = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(project_root)
+from MathTools.Rotation import *
+
 conn = krpc.connect(name='Flight Data')
 
 space_center = conn.space_center
@@ -70,21 +75,21 @@ class rocket_control(object):
 
         p_turn = 4.0
         i_turn = 0.0
-        d_turn = 1.4 # 1.4
+        d_turn = 3.0 # 1.4
 
         # 水平减速参数
         # 姿态环
         self.pointing_pid = PositionPID(max=1, min=-1, p=p_turn, i=i_turn, d=d_turn)
 
         # 水平加速度环
-        self.hor_acc_pid = PositionPID(max=20.0, min=0, p=20.0, i=0.0, d=2.0) # p=0.2, i=0.001, d=0.14
+        self.hor_acc_pid = PositionPID(max=20.0, min=0, p=0.2, i=0.0, d=0.2) # p=0.2, i=0.001, d=0.14
         # 水平速度环
-        self.hor_speed_pid = PositionPID(max=50.0, min=0, p=10.0, i=0*0.001, d=5.0) # p=0.2, i=0.001, d=0.14
+        self.hor_speed_pid = PositionPID(max=50.0, min=0, p=0.2, i=0.0, d=0.2) # p=0.2, i=0.001, d=0.14
 
         self.yaw_pid = copy.deepcopy(self.pointing_pid)
         self.pitch_pid = copy.deepcopy(self.pointing_pid)
         self.roll_pid = PositionPID(max=1, min=-1, p=p_turn/50, i=i_turn, d=p_turn/50 * 0.3)
-        self.height_controller = PositionPID(max=1, min=0, p=0.03, i=0, d=0.025)
+        self.height_controller = PositionPID(max=1, min=0, p=0.06, i=0.007, d=0.05)
 
         # 体轴基本方向  
         self.body_axes = {  
@@ -99,12 +104,12 @@ class rocket_control(object):
         for i, engine in enumerate(vessel.parts.engines):  
             # 获取引擎部件在体轴系中的位置（相对于质心）  
             position = RFD2FRD(engine.part.position(vessel.reference_frame))
-            print(f"{i}: ({position[0]:.2f}, {position[1]:.2f}, {position[2]:.2f}) - {engine.part.title}")
+            # print(f"{i}: ({position[0]:.2f}, {position[1]:.2f}, {position[2]:.2f}) - {engine.part.title}")
             # 获取推力方向（相对与体轴，但是左手系）
             direction = engine.thrusters[0].thrust_direction(vessel.reference_frame)
             F_direction = RFD2FRD(direction)
             F_direction /= (norm(F_direction)+1e-8)
-            print(F_direction)
+            # print(F_direction)
             self.engines_Mb[i] = np.cross(position/(norm(position)+1e-8), F_direction)
 
         self.x_b_in_b_ = np.array([1,0,0]) # 前
@@ -187,7 +192,9 @@ class rocket_control(object):
         # 当前推重比
         self.current_twr = self.vessel.thrust / (self.mass * self.g)
         # 最大推重比
-        self.max_twr = self.vessel.available_thrust / (self.mass * self.g)
+        self.max_twr = self.vessel.max_thrust / (self.mass * self.g)
+        # self.max_twr = self.vessel.available_thrust / (self.mass * self.g)
+
         # 获取发动机的可用力矩  
         self.engine = self.vessel.parts.engines[0]  
         self.torque = self.engine.available_torque  # 返回 (pitch, roll, yaw) 的力矩值，单位为 N.m
@@ -253,13 +260,25 @@ class rocket_control(object):
         # 基于机械能估算
         h_max_thrust = (1/2*self.speed_surf**2 + self.g * self.surface_altitude)/max(self.g * self.max_twr * - cos_AO , 1e-3) * 1.3
         
-        # # 用总速度估算 替换掉 sin(pitch)
-        # h_max_thrust = (self.speed_surf**2)/(2*self.g*(self.max_twr * (thrust_direction_[1]/(norm(thrust_direction_)+1e-3)) - 1)+1e-5) * 1.3 # 安全高度倍率
-
         # 高于最大推力高度时， 优先控制姿态
         if self.surface_altitude > max(h_max_thrust, 50):
             target_point0_ = - self.velocity_surf / (self.speed_surf + 1e-5)
-            target_point_ = target_point0_
+            # # 直接这么写会引起振荡
+            # target_point_ = target_point0_
+            
+            # 带上角速度阻尼
+            point_angle_error = np.arccos(np.dot(target_point0_, thrust_direction_)*0.999)
+            temp = np.cross(thrust_direction_, target_point0_)
+            point_angle_error_axis_ = temp/(norm(temp)+1e-5)
+
+            alpha = point_angle_error - np.sqrt(self.p**2+self.q**2+self.r**2) * 0.1
+
+            # 罗德里格斯旋转公式
+            target_point_ = RodRot(thrust_direction_, point_angle_error_axis_, alpha)
+
+            # 防止头朝下
+            target_point_[1] = max(0, target_point_[1])
+
             control.throttle = 0.01 # 用微小的油门控制姿态
             target_descend_speed = self.vertical_speed  # 保持当前下降速度
             # target_speed = self.speed_surf  # 保持当前下降速度
@@ -286,17 +305,6 @@ class rocket_control(object):
             else:
                 target_point_[1] = max(target_point_[1], 5.0) # 至少都要朝上
             
-            # print("下降率", self.vertical_speed)
-            # print("高度", self.surface_altitude)
-
-            # # 速度过快，满推力减速
-            # if abs(self.vertical_speed) > 10:
-            #     target_descend_speed = -10
-            # # 速度可接受，按高度指定下降速度
-            # elif self.surface_altitude > 12:
-            #     target_descend_speed = -5 # np.clip(self.surface_altitude/100, 0, 1)*-10
-            #     # target_speed = 5
-            # else:
             target_descend_speed = -10
             if self.surface_altitude < 12:
                 target_descend_speed = -2 # np.clip(self.surface_altitude/100, 0, 1)*-2
@@ -398,45 +406,41 @@ class rocket_control(object):
         # 最大允许倾斜角正切值
         max_tan_lean_allowed = np.sqrt(max(0, self.max_twr**2 - 1))
 
-        # 根据水平速度误差调节倾斜方向和大小
+
+        # # 根据水平速度误差调节倾斜方向和大小
         target_point0_ = np.array([0, 1, 0], dtype='float64')
         v_N = self.velocity_surf[0]
         v_E = self.velocity_surf[2]
 
-        # 速度环误差 (规范化：目标 - 当前)
+        # 速度环输入水平速度误差，输出期望水平加速度
         v_N_error = target_N_speed - v_N
         v_E_error = target_E_speed - v_E
         v_error_vec = np.array([v_N_error, 0.0, v_E_error])
         v_hor_error_mag = np.linalg.norm(v_error_vec)
 
-        "带加速度环期望姿态"
-        # 计算当前水平加速度分量
+        target_a_hor_mag = self.hor_speed_pid.calculate(v_hor_error_mag, dt=dt)
+        a_hor_desired = v_error_vec / (v_hor_error_mag+1e-5) * target_a_hor_mag
+
+        # 加速度环输入加速度误差，输出期望指向
+        a_N_desired, _, a_E_desired = a_hor_desired
+
         a_N = self.current_twr * self.g * thrust_direction_[0]
         a_E = self.current_twr * self.g * thrust_direction_[2]
         
-        # 期望加速度 (规范化：由速度误差计算目标加速度)
-        # v_error_vec 是目标减当前，所以 pid 计算出的就是目标加速度方向
-        target_a_hor_mag = self.hor_speed_pid.calculate(v_hor_error_mag, dt=dt)
-        target_N_a = target_a_hor_mag * v_N_error / (v_hor_error_mag + 1e-5)
-        target_E_a = target_a_hor_mag * v_E_error / (v_hor_error_mag + 1e-5)
-        
-        # 加速度环误差 (规范化：目标 - 当前)
-        a_N_error = target_N_a - a_N
-        a_E_error = target_E_a - a_E
+        a_N_error = a_N_desired - a_N
+        a_E_error = a_E_desired - a_E
+
         a_error_vec = np.array([a_N_error, 0.0, a_E_error])
         a_hor_error_mag = np.linalg.norm(a_error_vec)
         
         # 期望指向计算 (规范化：利用加速度误差直接补偿指向)
-        target_point_hor_ = self.hor_acc_pid.calculate(a_hor_error_mag, dt=dt) * \
+        # target_point_hor_ = self.hor_acc_pid.calculate(a_hor_error_mag, dt=dt)
+        target_point_hor_ = a_hor_error_mag * \
             a_error_vec / (a_hor_error_mag + 1e-5)
         
-        # 最终指向 = 默认向上 + 指向修正 啥啊这是？？？
-        target_point_ = target_point0_ + target_point_hor_ * \
-            min(max_tan_lean_allowed, self.pointing_pid.calculate(v_hor_error_mag, dt=dt) * \
-                norm(target_point_hor_)) / (norm(target_point_hor_) + 1e-5)
-        # target_point_ = target_point0_ + target_point_hor_ * \
-        #     min(max_tan_lean_allowed, self.pointing_pid.calculate(v_hor_error_mag, dt=dt) * norm(target_point_hor_)) / \
-        #     (norm(target_point_hor_) + 1e-5)
+        # 最终指向 = 默认向上 + 指向修正 
+        target_point_ = target_point0_ + \
+            min(max_tan_lean_allowed, norm(target_point_hor_))/(norm(target_point_hor_)+1e-5) * target_point_hor_
 
         "姿态控制"    
         # 归一化

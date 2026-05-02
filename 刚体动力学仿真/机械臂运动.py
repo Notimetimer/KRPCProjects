@@ -176,7 +176,7 @@ if __name__=='__main__':
 
         # 3. 臂4：psi 锁定为 90°
         psis[3] = np.radians(90)
-        phis[3] = delta_phis0[3] + 1.0 * t
+        phis[3] = delta_phis0[3] + 5.0 * t
         
         
         # 使用 set_state 更新状态，不破坏 reset 的含义
