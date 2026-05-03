@@ -22,7 +22,9 @@ class MultiArms:
         lengths_of_arms,
         ):
         self.lengths0 = lengths_of_arms
+        self.lengths = lengths_of_arms
         self.joint0_ = np.array([0.0, 0.0, 0.0])
+        
 
     def reset(self):
         # 恢复到初始固定样式 (直线伸展)
@@ -80,30 +82,16 @@ class MultiArms:
         theta_dots,
         psi_dots,):
         # 仅考虑运动学的前进
-        prev_joint_ = self.joint0_
-        prev_Rotation_matrix = np.eye(3)
-        # 循环计算
         for i in range(len(self.lengths0)):
             # 计算下一个节点相对上一个节点的位置
             self.lengths[i] += length_dots[i] * dt
             # 根据角速度前进
             self.delta_phis[i] += phi_dots[i] * dt
             self.delta_thetas[i] += theta_dots[i] * dt
-            self.delta_psis[i] += psi_dots * dt
-            Rotation_i = RotMat_zyx(self.delta_phis[i], self.delta_thetas[i], self.delta_psis[i])
-            # 处理累积旋转矩阵
-            Rotation_matrix = Rotation_i @ prev_Rotation_matrix
-            curr_delta_x = np.array([self.lengths[i], 0, 0])
-            current_joint_ = prev_joint_ + left_multiply(Rotation_matrix.T, curr_delta_x)
-            
-            self.joint_s.append(current_joint_)
-            # 记录当前关节的局部坐标轴在全局坐标系下的方向
-            self.x_s[i] = left_multiply(Rotation_matrix.T, np.array([1, 0, 0]))
-            self.y_s[i] = left_multiply(Rotation_matrix.T, np.array([0, 1, 0]))
-            self.z_s[i] = left_multiply(Rotation_matrix.T, np.array([0, 0, 1]))
-
-            prev_Rotation_matrix = Rotation_matrix
-            prev_joint_ = current_joint_
+            self.delta_psis[i] += psi_dots[i] * dt
+        
+        # 重新计算整个运动链以更新 joint_s, x_s, y_s, z_s
+        self.forward_kinematics()
 
 
     def render(self, ax):
@@ -168,11 +156,11 @@ if __name__=='__main__':
         
         # 运动逻辑设定:
         # 1. 臂1 和 臂2：在 psi 方向做缓慢的正弦运动
-        psis[0] = delta_psis0[0] + np.radians(20) * sin(0.5 * t)
-        psis[1] = delta_psis0[1] + np.radians(30) * sin(0.5 * t)
+        psis[0] = delta_psis0[0] + np.radians(20) * sin(0.9 * t)
+        psis[1] = delta_psis0[1] + np.radians(30) * sin(0.9 * t)
         
         # 2. 臂3：在 theta 方向做正弦运动
-        psis[2] = delta_psis0[2] + np.radians(20) * sin(0.5 * t)
+        psis[2] = delta_psis0[2] + np.radians(20) * sin(0.9 * t)
 
         # 3. 臂4：psi 锁定为 90°
         psis[3] = np.radians(90)
